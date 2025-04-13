@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   const webmPath = path.join('C:/Users/marac/nminutes/temp', filename);
   const wavPath = webmPath.replace('.webm', '.wav');
 
-  const modelPath = 'C:/Users/marac/nminutes/whisper.cpp/models/ggml-base.en.bin';
+  const modelPath = 'C:/Users/marac/nminutes/whisper.cpp/models/ggml-base.bin';
   const execPath = 'C:/Users/marac/nminutes/whisper.cpp/build/bin/Release/whisper-cli.exe';
 
   await writeFile(webmPath, buffer);
