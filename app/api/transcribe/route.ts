@@ -1,63 +1,118 @@
 import { NextResponse } from 'next/server';
-import { writeFile, unlink } from 'fs/promises';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import os from 'os';
+
+export const runtime = 'nodejs';
+
+function requireEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
+function runProcess(
+  command: string,
+  args: string[],
+  label: string
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args);
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString();
+    });
+    proc.on('error', (err) => {
+      reject(new Error(`${label} を起動できませんでした: ${err.message}`));
+    });
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(
+          new Error(
+            `${label} が失敗しました (exit ${code})${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
+          )
+        );
+      }
+    });
+  });
+}
+
+function stripTimestamps(raw: string): string {
+  return raw
+    .replace(/\[\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\]\s*/g, '')
+    .trim();
+}
 
 export async function POST(req: Request) {
-  const formData = await req.formData();
-  const file = formData.get('file');
+  const whisperBin = requireEnv('WHISPER_BIN');
+  const whisperModel = requireEnv('WHISPER_MODEL');
+  const ffmpegBin = requireEnv('FFMPEG_BIN') ?? 'ffmpeg';
+  const tempDir = requireEnv('TEMP_DIR') ?? path.join(os.tmpdir(), 'minutes-temp');
+  const whisperLang = requireEnv('WHISPER_LANG') ?? 'ja';
 
-  if (!file || !(file instanceof Blob)) {
-    return NextResponse.json({ error: '音声が見つからないよ〜💦' }, { status: 400 });
+  if (!whisperBin || !whisperModel) {
+    return NextResponse.json(
+      {
+        error:
+          'WHISPER_BIN と WHISPER_MODEL を .env.local に設定してください（.env.example 参照）。',
+      },
+      { status: 500 }
+    );
   }
 
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+  let formData: FormData;
+  try {
+    formData = await req.formData();
+  } catch {
+    return NextResponse.json({ error: 'リクエストを読めませんでした。' }, { status: 400 });
+  }
 
-  const filename = `audio-${Date.now()}.webm`;
-  const webmPath = path.join('C:/Users/marac/nminutes/temp', filename);
-  const wavPath = webmPath.replace('.webm', '.wav');
+  const file = formData.get('file');
+  if (!file || !(file instanceof Blob)) {
+    return NextResponse.json({ error: '音声ファイルが見つかりません。' }, { status: 400 });
+  }
 
-  const modelPath = 'C:/Users/marac/nminutes/whisper.cpp/models/ggml-base.en.bin';
-  const execPath = 'C:/Users/marac/nminutes/whisper.cpp/build/bin/Release/whisper-cli.exe';
+  const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const webmPath = path.join(tempDir, `${id}.webm`);
+  const wavPath = path.join(tempDir, `${id}.wav`);
 
-  await writeFile(webmPath, buffer);
+  try {
+    await fs.mkdir(tempDir, { recursive: true });
 
-  await new Promise((resolve, reject) => {
-    const ffmpeg = spawn('D:/contempo/ffmpeg-7.1.1-essentials_build/ffmpeg-7.1.1-essentials_build/bin/ffmpeg.exe', [
-      '-i', webmPath, wavPath
-    ]);
-    ffmpeg.on('close', (code) => {
-      code === 0 ? resolve(null) : reject(new Error('ffmpeg failed'));
-    });
-  });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    if (buffer.length === 0) {
+      return NextResponse.json({ error: '音声データが空です。' }, { status: 400 });
+    }
+    await fs.writeFile(webmPath, buffer);
 
-  const result = await new Promise<string>((resolve, reject) => {
-    const proc = spawn(execPath, [
-      '-m', modelPath,
-      '-f', wavPath,
-      '-l', 'ja' // ← ここ追加だけ！！
-    ]);
-    let output = '';
-    proc.stdout.on('data', (data) => (output += data.toString()));
-    proc.stderr.on('data', (data) => console.error(`stderr: ${data}`));
-    proc.on('close', (code) => {
-      code === 0 ? resolve(output) : reject(new Error('whisper-cli failed'));
-    });
-  });
-  
-  const plainText = result
-  .replace(/\[\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\]\s*/g, '')
-  .trim();
-  
-   const txtPath = webmPath.replace('.webm', '.txt');
-   const plainPath = webmPath.replace('.webm', '.plain.txt');
-   await fs.writeFile(txtPath, result, 'utf-8');
-   await fs.writeFile(plainPath, plainText, 'utf-8');
-  
-   await unlink(webmPath);
-   await unlink(wavPath);
+    await runProcess(
+      ffmpegBin,
+      ['-y', '-i', webmPath, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
+      'ffmpeg'
+    );
 
-  return NextResponse.json({ text: result });
+    const { stdout } = await runProcess(
+      whisperBin,
+      ['-m', whisperModel, '-f', wavPath, '-l', whisperLang],
+      'whisper-cli'
+    );
+
+    // Prefer plain text; -nt should omit timestamps, but strip anyway if present
+    const plainText = stripTimestamps(stdout);
+
+    return NextResponse.json({ text: plainText });
+  } catch (err) {
+    console.error('transcribe error:', err);
+    const message = err instanceof Error ? err.message : '文字起こしに失敗しました。';
+    return NextResponse.json({ error: message }, { status: 500 });
+  } finally {
+    await Promise.allSettled([fs.unlink(webmPath), fs.unlink(wavPath)]);
+  }
 }
