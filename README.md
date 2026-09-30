@@ -77,6 +77,21 @@ npm run dev
 - **P2:** 話者分離 (diarization)
 - **P3:** Electron/Tauri などデスクトップ常駐
 
+
+## Troubleshooting
+
+### `TypeError: localStorage.getItem is not a function` (GET / 500)
+
+This is a **Node.js 25+** issue: experimental Web Storage exposes a broken `localStorage` (warning: `--localstorage-file` was provided without a valid path). Our app code does not use `localStorage`; Next.js / tooling hits it during SSR.
+
+Mitigations already in this repo:
+- `scripts/polyfill-localstorage.cjs` is preloaded by `npm run dev|build|start`
+- `instrumentation.ts` + `next.config.ts` also patch on server boot
+
+Workarounds if it still happens:
+- Prefer **Node 20 or 22 LTS** (`engines` recommends `<25`)
+- Or disable the experiment: `node --no-experimental-webstorage node_modules/next/dist/bin/next dev`
+
 ## License
 
 Private / TBD

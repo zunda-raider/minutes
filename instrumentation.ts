@@ -1,36 +1,42 @@
-import type { NextConfig } from "next";
+/**
+ * Server startup hook: neutralize Node 25 broken localStorage before SSR.
+ * @see scripts/polyfill-localstorage.cjs
+ */
+export async function register() {
+  if (process.env.NEXT_RUNTIME === 'edge') return;
 
-// Node 25+ may expose a broken global localStorage (empty Proxy without getItem).
-// Patch before Next continues loading so SSR of `/` does not 500.
-(() => {
   try {
     const ls = (globalThis as { localStorage?: Storage }).localStorage;
-    if (ls != null && typeof ls.getItem === "function") return;
+    if (ls != null && typeof ls.getItem === 'function') return;
   } catch {
-    // fall through
+    // continue to polyfill
   }
+
   const store = new Map<string, string>();
   const memoryStorage: Storage = {
-    getItem: (key) => {
+    getItem(key) {
       const k = String(key);
       return store.has(k) ? store.get(k)! : null;
     },
-    setItem: (key, value) => {
+    setItem(key, value) {
       store.set(String(key), String(value));
     },
-    removeItem: (key) => {
+    removeItem(key) {
       store.delete(String(key));
     },
-    clear: () => {
+    clear() {
       store.clear();
     },
-    key: (index) => Array.from(store.keys())[Number(index)] ?? null,
+    key(index) {
+      return Array.from(store.keys())[Number(index)] ?? null;
+    },
     get length() {
       return store.size;
     },
   };
+
   try {
-    Object.defineProperty(globalThis, "localStorage", {
+    Object.defineProperty(globalThis, 'localStorage', {
       value: memoryStorage,
       writable: true,
       configurable: true,
@@ -43,10 +49,4 @@ import type { NextConfig } from "next";
       // ignore
     }
   }
-})();
-
-const nextConfig: NextConfig = {
-  /* config options here */
-};
-
-export default nextConfig;
+}
