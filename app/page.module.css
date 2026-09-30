@@ -93,3 +93,40 @@
     background: #1a1a1a;
   }
 }
+
+.langRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.langLabel {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.langSelect {
+  appearance: auto;
+  font-size: 1rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #d4d4d8;
+  background: #fff;
+  color: inherit;
+  min-width: 12rem;
+}
+
+.langSelect:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (prefers-color-scheme: dark) {
+  .langSelect {
+    background: #1a1a1a;
+    border-color: #3f3f46;
+  }
+}

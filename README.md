@@ -10,7 +10,7 @@
 - Node.js 18+
 - [ffmpeg](https://ffmpeg.org/)（PATH 上、または `FFMPEG_BIN`）
 - ビルド済み [whisper.cpp](https://github.com/ggerganov/whisper.cpp) の `whisper-cli`
-- Whisper モデル（日本語なら **`ggml-base.bin`** 推奨。英語専用は `ggml-base.en.bin`）
+- Whisper モデル（**多言語**推奨。例: `ggml-large-v3-turbo-q8_0.bin` / `ggml-base.bin`。英語専用 `*.en.bin` は日英切替不可）
 
 ## セットアップ
 
@@ -26,10 +26,11 @@ cp .env.example .env.local
 | 変数 | 必須 | 説明 |
 |------|------|------|
 | `WHISPER_BIN` | Yes | `whisper-cli` の実行ファイルパス |
-| `WHISPER_MODEL` | Yes | モデルファイルパス（日本語: `ggml-base.bin`） |
+| `WHISPER_MODEL` | Yes | 多言語モデルのパス（日英切替なら `*.en.bin` 以外） |
 | `FFMPEG_BIN` | No | ffmpeg（省略時は `ffmpeg`） |
 | `TEMP_DIR` | No | 一時音声ディレクトリ |
-| `WHISPER_LANG` | No | 言語コード（省略時 `ja`） |
+| `WHISPER_LANG` | No | デフォルト言語（省略時 `ja`） |
+| `WHISPER_LANGS` | No | 許可言語リスト（省略時 `ja,en`） |
 
 ### Windows の例
 
@@ -38,15 +39,27 @@ WHISPER_BIN=C:/Users/you/nminutes/whisper.cpp/build/bin/Release/whisper-cli.exe
 WHISPER_MODEL=C:/Users/you/nminutes/whisper.cpp/models/ggml-base.bin
 FFMPEG_BIN=C:/path/to/ffmpeg.exe
 WHISPER_LANG=ja
+WHISPER_LANGS=ja,en
 ```
 
-### macOS / Linux の例
+### macOS の例（量子化 multi-lingual）
+
+```env
+WHISPER_BIN=/Users/taiki714/Desktop/whisper/whisper.cpp/build/bin/whisper-cli
+WHISPER_MODEL=/Users/taiki714/Desktop/whisper/whisper.cpp/models/ggml-large-v3-turbo-q8_0.bin
+FFMPEG_BIN=ffmpeg
+WHISPER_LANG=ja
+WHISPER_LANGS=ja,en
+```
+
+### Linux の例
 
 ```env
 WHISPER_BIN=/usr/local/bin/whisper-cli
 WHISPER_MODEL=/path/to/models/ggml-base.bin
 FFMPEG_BIN=ffmpeg
 WHISPER_LANG=ja
+WHISPER_LANGS=ja,en
 ```
 
 ## 起動
@@ -55,7 +68,8 @@ WHISPER_LANG=ja
 npm run dev
 ```
 
-ブラウザで [http://localhost:3000](http://localhost:3000) を開き、「録音開始」→「停止」で文字起こし結果が表示されます。
+ブラウザで [http://localhost:3000](http://localhost:3000) を開き、言語（日本語 / English）を選んでから「録音開始」→「停止」で文字起こしします。
+許可言語は `WHISPER_LANGS`（UI は `/api/config` 経由で同期）。
 
 ## 使い方の注意
 
@@ -72,7 +86,8 @@ npm run dev
 
 ## ロードマップ
 
-- **P0 (このブランチ):** 録音バグ修正・パスの環境変数化・日本語モデル・CSS 修正
+- **P0:** 録音バグ修正・パスの環境変数化・CSS / Node25 localStorage 修正
+- **言語切替:** UI で ja/en を選択し `whisper-cli -l` に渡す（本機能）
 - **P1:** 音声ソース切替（Zoom/システム音声）・チャンクアップロード・visibility 警告
 - **P2:** 話者分離 (diarization)
 - **P3:** Electron/Tauri などデスクトップ常駐
