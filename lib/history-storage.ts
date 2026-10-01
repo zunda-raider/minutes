@@ -13,6 +13,7 @@ export type StoredTranscriptEntry = {
 };
 
 export const HISTORY_STORAGE_KEY = 'minutes.transcript.entries.v1';
+export const SUMMARY_STORAGE_KEY = 'minutes.transcript.summary.v1';
 
 function canUseStorage(): boolean {
   return (
@@ -67,5 +68,38 @@ export function clearStoredEntries(): void {
     localStorage.removeItem(HISTORY_STORAGE_KEY);
   } catch (err) {
     console.error('history clear failed:', err);
+  }
+}
+
+export function loadSummary(): string {
+  if (!canUseStorage()) return '';
+  try {
+    return localStorage.getItem(SUMMARY_STORAGE_KEY) ?? '';
+  } catch (err) {
+    console.error('summary load failed:', err);
+    return '';
+  }
+}
+
+export function saveSummary(summary: string): void {
+  if (!canUseStorage()) return;
+  try {
+    if (!summary) {
+      localStorage.removeItem(SUMMARY_STORAGE_KEY);
+    } else {
+      localStorage.setItem(SUMMARY_STORAGE_KEY, summary);
+    }
+  } catch (err) {
+    console.error('summary save failed:', err);
+    throw err;
+  }
+}
+
+export function clearStoredSummary(): void {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.removeItem(SUMMARY_STORAGE_KEY);
+  } catch (err) {
+    console.error('summary clear failed:', err);
   }
 }
