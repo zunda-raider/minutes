@@ -10,6 +10,7 @@ type TranscriptEntry = {
   text: string;
   lang: string;
   at: string; // ISO
+  textJa?: string;
 };
 
 /** How often to cut a segment and send it to Whisper while still recording. */
@@ -35,17 +36,23 @@ function formatTime(iso: string): string {
   }
 }
 
+function isEnglishEntry(entry: TranscriptEntry): boolean {
+  return entry.lang === 'en' || entry.lang.startsWith('en-');
+}
+
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [translatingIds, setTranslatingIds] = useState<Set<string>>(new Set());
   const [langs, setLangs] = useState<LangOption[]>([
     { code: 'ja', label: '日本語' },
     { code: 'en', label: 'English' },
   ]);
   const [lang, setLang] = useState('ja');
+  const [translateConfigured, setTranslateConfigured] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -62,6 +69,9 @@ export default function Home() {
   const queueRunningRef = useRef(false);
 
   const isTranscribing = pendingCount > 0;
+  const untranslatedEn = entries.filter(
+    (e) => isEnglishEntry(e) && !e.textJa
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +82,7 @@ export default function Home() {
         const data = (await res.json()) as {
           defaultLang?: string;
           langs?: LangOption[];
+          translateConfigured?: boolean;
         };
         if (cancelled) return;
         if (Array.isArray(data.langs) && data.langs.length > 0) {
@@ -80,6 +91,7 @@ export default function Home() {
         if (data.defaultLang) {
           setLang(data.defaultLang);
         }
+        setTranslateConfigured(Boolean(data.translateConfigured));
       } catch (e) {
         console.error('config fetch failed:', e);
       }
@@ -151,7 +163,8 @@ export default function Home() {
             lang: data.lang || langRef.current,
             at: new Date().toISOString(),
           };
-          setEntries((prev) => [...prev, entry]);
+          // Newest first
+          setEntries((prev) => [entry, ...prev]);
           setError('');
         } else {
           setError('変換はできたけど、内容が空でした。');
@@ -214,7 +227,6 @@ export default function Home() {
         return;
       }
 
-      // Final stop (user ended session)
       if (!wantRecordingRef.current) {
         stopTracks();
         setIsRecording(false);
@@ -235,7 +247,6 @@ export default function Home() {
 
   const startRecording = async () => {
     setError('');
-    // Do NOT clear previous transcript history
 
     let stream: MediaStream;
     try {
@@ -274,7 +285,6 @@ export default function Home() {
       return;
     }
     recorder.stop();
-    // isRecording cleared in onstop after last segment is queued
   };
 
   const copyText = async (id: string, text: string) => {
@@ -292,7 +302,9 @@ export default function Home() {
 
   const copyAll = async () => {
     if (entries.length === 0) return;
-    const all = entries.map((e) => e.text).join('\n\n');
+    const all = entries
+      .map((e) => (e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text))
+      .join('\n\n---\n\n');
     await copyText('__all__', all);
   };
 
@@ -301,31 +313,77 @@ export default function Home() {
     setCopiedId(null);
   };
 
+  const translateEntry = async (entry: TranscriptEntry) => {
+    if (!isEnglishEntry(entry) || entry.textJa) return;
+
+    setTranslatingIds((prev) => new Set(prev).add(entry.id));
+    try {
+      const res = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: entry.text }),
+      });
+      const data = (await res.json()) as { textJa?: string; error?: string };
+      if (!res.ok) {
+        setError(data.error || `翻訳に失敗しました (${res.status})`);
+        return;
+      }
+      if (!data.textJa?.trim()) {
+        setError('翻訳結果が空でした。');
+        return;
+      }
+      setEntries((prev) =>
+        prev.map((e) =>
+          e.id === entry.id ? { ...e, textJa: data.textJa!.trim() } : e
+        )
+      );
+      setError('');
+    } catch (e) {
+      console.error('translate failed:', e);
+      setError('翻訳リクエストに失敗しました。');
+    } finally {
+      setTranslatingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(entry.id);
+        return next;
+      });
+    }
+  };
+
+  const translateAllEnglish = async () => {
+    const targets = entries.filter((e) => isEnglishEntry(e) && !e.textJa);
+    for (const entry of targets) {
+      // Sequential to avoid rate limits
+      await translateEntry(entry);
+    }
+  };
+
   return (
     <main className={styles.main}>
       <h1 className={styles.title}>🎤 議事録アプリ</h1>
       <p className={styles.hint}>
         録音中も約{SEGMENT_MS / 1000}
-        秒ごとに Whisper へ送信します。文字起こし待ちでも録音は続きます。結果は履歴に追加されます。
+        秒ごとに Whisper へ送信します。結果は新しい順に表示されます。英語の結果は日本語へ翻訳できます。
       </p>
 
       <div className={styles.langRow}>
-        <label htmlFor="lang-select" className={styles.langLabel}>
-          言語 / Language
-        </label>
-        <select
-          id="lang-select"
-          className={styles.langSelect}
-          value={lang}
-          disabled={isRecording}
-          onChange={(e) => setLang(e.target.value)}
-        >
+        <span className={styles.langLabel}>言語 / Language</span>
+        <div className={styles.langToggle} role="group" aria-label="Language">
           {langs.map((opt) => (
-            <option key={opt.code} value={opt.code}>
-              {opt.label} ({opt.code})
-            </option>
+            <button
+              key={opt.code}
+              type="button"
+              className={
+                lang === opt.code ? styles.langButtonActive : styles.langButton
+              }
+              disabled={isRecording}
+              aria-pressed={lang === opt.code}
+              onClick={() => setLang(opt.code)}
+            >
+              {opt.label}
+            </button>
           ))}
-        </select>
+        </div>
       </div>
 
       <div className={styles.controls}>
@@ -354,8 +412,20 @@ export default function Home() {
 
       <section className={styles.result}>
         <div className={styles.resultHeader}>
-          <h2 className={styles.resultTitle}>📝 結果（{entries.length}）</h2>
+          <h2 className={styles.resultTitle}>📝 結果（{entries.length}）· 新しい順</h2>
           <div className={styles.resultActions}>
+            {untranslatedEn.length > 0 && (
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={translateAllEnglish}
+                disabled={translatingIds.size > 0}
+              >
+                {translateConfigured
+                  ? `英語を全て日本語へ（${untranslatedEn.length}）`
+                  : '英語を全て日本語へ'}
+              </button>
+            )}
             <button
               type="button"
               className={styles.secondaryButton}
@@ -381,23 +451,52 @@ export default function Home() {
           </p>
         ) : (
           <ul className={styles.entryList}>
-            {entries.map((entry, index) => (
-              <li key={entry.id} className={styles.entry}>
-                <div className={styles.entryMeta}>
-                  <span>
-                    #{index + 1} · {entry.lang} · {formatTime(entry.at)}
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.copyButton}
-                    onClick={() => copyText(entry.id, entry.text)}
-                  >
-                    {copiedId === entry.id ? '✓ コピーした' : 'コピー'}
-                  </button>
-                </div>
-                <pre className={styles.transcript}>{entry.text}</pre>
-              </li>
-            ))}
+            {entries.map((entry, index) => {
+              const translating = translatingIds.has(entry.id);
+              const showTranslate = isEnglishEntry(entry) && !entry.textJa;
+              return (
+                <li key={entry.id} className={styles.entry}>
+                  <div className={styles.entryMeta}>
+                    <span>
+                      #{index + 1} · {entry.lang} · {formatTime(entry.at)}
+                    </span>
+                    <div className={styles.entryActions}>
+                      {showTranslate && (
+                        <button
+                          type="button"
+                          className={styles.translateButton}
+                          disabled={translating}
+                          onClick={() => translateEntry(entry)}
+                        >
+                          {translating ? '翻訳中…' : '日本語に翻訳'}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={styles.copyButton}
+                        onClick={() =>
+                          copyText(
+                            entry.id,
+                            entry.textJa
+                              ? `${entry.text}\n\n（日本語）\n${entry.textJa}`
+                              : entry.text
+                          )
+                        }
+                      >
+                        {copiedId === entry.id ? '✓ コピーした' : 'コピー'}
+                      </button>
+                    </div>
+                  </div>
+                  <pre className={styles.transcript}>{entry.text}</pre>
+                  {entry.textJa && (
+                    <div className={styles.translationBlock}>
+                      <div className={styles.translationLabel}>日本語訳</div>
+                      <pre className={styles.transcriptJa}>{entry.textJa}</pre>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
