@@ -31,8 +31,10 @@ cp .env.example .env.local
 | `TEMP_DIR` | No | 一時音声ディレクトリ |
 | `WHISPER_LANG` | No | デフォルト言語（省略時 `ja`） |
 | `WHISPER_LANGS` | No | 許可言語リスト（省略時 `ja,en`） |
-| `OPENAI_API_KEY` / `TRANSLATE_API_KEY` | No* | 英語→日本語翻訳（未設定時は「翻訳用APIキー未設定」） |
-| `OPENAI_MODEL` | No | 翻訳モデル（省略時 `gpt-4o-mini`） |
+| `OLLAMA_BASE_URL` | No | Ollama URL（省略時 `http://127.0.0.1:11434`） |
+| `OLLAMA_MODEL` | No | Ollama モデル（省略時 `llama3.2`） |
+| `TRANSLATE_PROVIDER` | No | `auto`（Ollama→OpenAI）/ `ollama` / `openai` |
+| `OPENAI_API_KEY` | No | 任意のフォールバック用 |
 
 ### Windows の例
 
@@ -52,7 +54,8 @@ WHISPER_MODEL=/Users/taiki714/Desktop/whisper/whisper.cpp/models/ggml-large-v3-t
 FFMPEG_BIN=ffmpeg
 WHISPER_LANG=ja
 WHISPER_LANGS=ja,en
-OPENAI_API_KEY=sk-...
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2
 ```
 
 ### Linux の例
@@ -64,6 +67,30 @@ FFMPEG_BIN=ffmpeg
 WHISPER_LANG=ja
 WHISPER_LANGS=ja,en
 ```
+
+
+## Ollama ローカル翻訳
+
+英語セグメントの「Ollamaでローカル翻訳」は、既定でローカル [Ollama](https://ollama.com) を使います。
+
+```bash
+# macOS
+brew install ollama
+ollama serve          # 別ターミナルで常駐
+ollama pull llama3.2  # または好きなモデル名を OLLAMA_MODEL に合わせる
+```
+
+`.env.local` 例:
+
+```env
+TRANSLATE_PROVIDER=auto
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2
+# 任意: Ollama 失敗時のフォールバック
+# OPENAI_API_KEY=sk-...
+```
+
+Ollama 未起動時は API が接続エラーを返し、UI に表示します。
 
 ## 起動
 
@@ -78,7 +105,7 @@ npm run dev
 
 - マイク許可が必要です。
 - 録音中はタブを閉じないでください（バックグラウンド常駐は未対応）。
-- 録音中も約 25 秒ごとにセグメントを Whisper へ送ります（録音と文字起こしは並行）。結果は**新しい順**に履歴表示。言語は **日本語 / English ボタン**で切替。英語結果は OpenAI キーがあれば「日本語に翻訳」できます。
+- 録音中も約 25 秒ごとにセグメントを Whisper へ送ります（録音と文字起こしは並行）。結果は**新しい順**に履歴表示。言語は **日本語 / English ボタン**で切替。英語結果は **Ollama ローカル翻訳**（任意で OpenAI フォールバック）できます。
 - Zoom の相手音声を取るにはシステム音声 / ループバックが必要です（未実装）。
 
 ## 技術スタック
