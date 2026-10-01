@@ -114,6 +114,11 @@ npm run dev
 許可言語は `WHISPER_LANGS`（UI は `/api/config` 経由で同期）。
 
 
+
+## 要約
+
+「要約」ボタンで文字起こし全体（古い順、日本語訳があれば併記）を Ollama（`OLLAMA_MODEL`）に送り、議題・決定・アクションの日本語箇条書きを生成します。結果は localStorage（`minutes.transcript.summary.v1`）に保存され、「要約クリア」または履歴クリアで消えます。
+
 ## 履歴の永続化
 
 文字起こし履歴（`id` / `note` / `text` / `lang` / `at` / `textJa`）はブラウザの **localStorage**（キー `minutes.transcript.entries.v1`）に保存され、リロード後も残ります。Home / Note 1 / Note 2 は同じストアを参照します。「履歴をクリア」で削除します。

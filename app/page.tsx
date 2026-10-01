@@ -4,8 +4,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
 import {
   clearStoredEntries,
+  clearStoredSummary,
   loadEntries,
+  loadSummary,
   saveEntries,
+  saveSummary,
 } from '@/lib/history-storage';
 
 type LangOption = { code: string; label: string };
@@ -63,6 +66,8 @@ export default function Home() {
   const [translateConfigured, setTranslateConfigured] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
   const [historyReady, setHistoryReady] = useState(false);
+  const [summary, setSummary] = useState('');
+  const [isSummarizing, setIsSummarizing] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -118,9 +123,10 @@ export default function Home() {
     };
   }, []);
 
-  // Hydrate transcript history from localStorage (client only)
+  // Hydrate transcript history + summary from localStorage (client only)
   useEffect(() => {
     setEntries(loadEntries());
+    setSummary(loadSummary());
     setHistoryReady(true);
   }, []);
 
@@ -135,6 +141,17 @@ export default function Home() {
       );
     }
   }, [entries, historyReady]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+    try {
+      saveSummary(summary);
+    } catch {
+      setError(
+        '要約の保存に失敗しました（ストレージ容量不足の可能性があります）。'
+      );
+    }
+  }, [summary, historyReady]);
 
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -347,9 +364,106 @@ export default function Home() {
 
   const clearAll = () => {
     setEntries([]);
+    setSummary('');
     setCopiedId(null);
     clearStoredEntries();
+    clearStoredSummary();
   };
+
+  const clearSummaryOnly = () => {
+    setSummary('');
+    clearStoredSummary();
+  };
+
+  const buildTranscriptForSummary = () => {
+    const chronological = [...entries].sort((a, b) => a.note - b.note);
+    return chronological
+      .map((e) => {
+        const header = `#${e.note} [${e.lang}] ${e.at}`;
+        if (e.textJa) {
+          return `${header}\n${e.text}\n(日本語訳)\n${e.textJa}`;
+        }
+        return `${header}\n${e.text}`;
+      })
+      .join('\n\n');
+  };
+
+  const runSummary = async () => {
+    if (entries.length === 0 || isSummarizing) return;
+    setIsSummarizing(true);
+    setError('');
+    try {
+      const res = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: buildTranscriptForSummary() }),
+      });
+      const data = (await res.json()) as { summary?: string; error?: string };
+      if (!res.ok) {
+        setError(data.error || `要約に失敗しました (${res.status})`);
+        return;
+      }
+      const next = data.summary?.trim() ?? '';
+      if (!next) {
+        setError('要約結果が空でした。');
+        return;
+      }
+      setSummary(next);
+    } catch (e) {
+      console.error('summarize failed:', e);
+      setError('要約リクエストに失敗しました。');
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
+  const renderSummaryPanel = () => (
+    <section className={styles.summaryPanel}>
+      <div className={styles.summaryHeader}>
+        <div>
+          <h2 className={styles.feedTitle}>要約</h2>
+          <p className={styles.feedCount}>
+            Ollama · 決定 / アクション / トピック
+          </p>
+        </div>
+        <div className={styles.feedActions}>
+          <button
+            type="button"
+            className={styles.ghostButton}
+            onClick={runSummary}
+            disabled={entries.length === 0 || isSummarizing}
+          >
+            {isSummarizing ? '要約中…' : '要約'}
+          </button>
+          <button
+            type="button"
+            className={styles.ghostButton}
+            onClick={() => summary && copyText('__summary__', summary)}
+            disabled={!summary}
+          >
+            {copiedId === '__summary__' ? 'Copied' : '要約をコピー'}
+          </button>
+          <button
+            type="button"
+            className={styles.ghostButtonDanger}
+            onClick={clearSummaryOnly}
+            disabled={!summary}
+          >
+            要約クリア
+          </button>
+        </div>
+      </div>
+      {summary ? (
+        <pre className={styles.summaryBody}>{summary}</pre>
+      ) : (
+        <p className={styles.summaryEmpty}>
+          {entries.length === 0
+            ? '文字起こしがあると要約できます。'
+            : '「要約」を押すと会議の決定・アクションをまとめます。'}
+        </p>
+      )}
+    </section>
+  );
 
   const translateEntry = async (entry: TranscriptEntry) => {
     if (!isEnglishEntry(entry) || entry.textJa) return;
@@ -491,6 +605,8 @@ export default function Home() {
         </p>
       )}
 
+      {renderSummaryPanel()}
+
       <section className={styles.feed}>
         <div className={styles.feedHeader}>
           <div>
@@ -526,7 +642,7 @@ export default function Home() {
               type="button"
               className={styles.ghostButtonDanger}
               onClick={clearAll}
-              disabled={entries.length === 0}
+              disabled={entries.length === 0 && !summary}
             >
               Clear
             </button>
@@ -687,6 +803,8 @@ export default function Home() {
         </p>
       </nav>
 
+      {renderSummaryPanel()}
+
       <section className={styles.feed}>
         <div className={styles.feedHeader}>
           <div>
@@ -720,7 +838,7 @@ export default function Home() {
               type="button"
               className={styles.ghostButtonDanger}
               onClick={clearAll}
-              disabled={entries.length === 0}
+              disabled={entries.length === 0 && !summary}
             >
               Clear
             </button>
