@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
+import { getWhisperLangConfig, resolveRequestLang } from '@/lib/whisper-lang';
 
 export const runtime = 'nodejs';
 
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
   const whisperModel = requireEnv('WHISPER_MODEL');
   const ffmpegBin = requireEnv('FFMPEG_BIN') ?? 'ffmpeg';
   const tempDir = requireEnv('TEMP_DIR') ?? path.join(os.tmpdir(), 'minutes-temp');
-  const whisperLang = requireEnv('WHISPER_LANG') ?? 'ja';
+  const langConfig = getWhisperLangConfig();
 
   if (!whisperBin || !whisperModel) {
     return NextResponse.json(
@@ -78,6 +79,20 @@ export async function POST(req: Request) {
   if (!file || !(file instanceof Blob)) {
     return NextResponse.json({ error: '音声ファイルが見つかりません。' }, { status: 400 });
   }
+
+  const requestedLang = formData.get('lang');
+  const langField =
+    typeof requestedLang === 'string'
+      ? requestedLang
+      : requestedLang == null
+        ? null
+        : String(requestedLang);
+
+  const resolved = resolveRequestLang(langField, langConfig);
+  if ('error' in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
+  }
+  const whisperLang = resolved.lang;
 
   const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const webmPath = path.join(tempDir, `${id}.webm`);
@@ -104,10 +119,9 @@ export async function POST(req: Request) {
       'whisper-cli'
     );
 
-    // Prefer plain text; -nt should omit timestamps, but strip anyway if present
     const plainText = stripTimestamps(stdout);
 
-    return NextResponse.json({ text: plainText });
+    return NextResponse.json({ text: plainText, lang: whisperLang });
   } catch (err) {
     console.error('transcribe error:', err);
     const message = err instanceof Error ? err.message : '文字起こしに失敗しました。';
