@@ -56,12 +56,6 @@ type TranscriptEntry = {
   speakerId?: number;
 };
 
-type DiarizeStatus = {
-  enabled: boolean;
-  mode: string;
-  active: boolean;
-  setupHint: string | null;
-};
 
 type Screen = 'home' | 'note1' | 'note2';
 type AudioSource = 'mic' | 'system';
@@ -125,10 +119,7 @@ export default function Home() {
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
-  const [diarizeStatus, setDiarizeStatus] = useState<DiarizeStatus | null>(null);
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
-  const [renamingEntryId, setRenamingEntryId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState('');
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
   /** Active speaker while recording (Zoom A–G or mic role). */
@@ -177,12 +168,6 @@ export default function Home() {
           defaultLang?: string;
           langs?: LangOption[];
           translateConfigured?: boolean;
-          diarize?: {
-            enabled?: boolean;
-            mode?: string;
-            active?: boolean;
-            setupHint?: string | null;
-          };
         };
         if (cancelled) return;
         if (Array.isArray(data.langs) && data.langs.length > 0) {
@@ -192,14 +177,6 @@ export default function Home() {
           setLang(data.defaultLang);
         }
         setTranslateConfigured(Boolean(data.translateConfigured));
-        if (data.diarize) {
-          setDiarizeStatus({
-            enabled: Boolean(data.diarize.enabled),
-            mode: data.diarize.mode || 'off',
-            active: Boolean(data.diarize.active),
-            setupHint: data.diarize.setupHint ?? null,
-          });
-        }
       } catch (e) {
         console.error('config fetch failed:', e);
       }
@@ -691,30 +668,8 @@ export default function Home() {
     return `${label}${body}`;
   };
 
-  const renameSpeaker = (speakerId: number, name: string) => {
-    const trimmed = name.trim();
-    setSpeakerLabels((prev) => {
-      const next = { ...prev };
-      if (!trimmed) delete next[String(speakerId)];
-      else next[String(speakerId)] = trimmed;
-      return next;
-    });
-    setRenamingEntryId(null);
-    setRenameDraft('');
-  };
 
 
-  const setEntrySpeaker = (entryId: string, speakerId: number, label?: string) => {
-    setEntries((prev) =>
-      prev.map((e) => (e.id === entryId ? { ...e, speakerId } : e))
-    );
-    if (label) {
-      setSpeakerLabels((prev) => {
-        if (prev[String(speakerId)]?.trim()) return prev;
-        return { ...prev, [String(speakerId)]: label };
-      });
-    }
-  };
 
   const reassignAllByPitch = async () => {
     if (autoAssignBusy) return;
@@ -779,23 +734,6 @@ export default function Home() {
     void clearAllAudio().catch((err) => console.error('audio clear failed:', err));
   };
 
-  const downloadSegmentAudio = async (entryId: string) => {
-    setAudioBusyId(entryId);
-    setError('');
-    try {
-      const seg = await getAudioSegment(entryId);
-      if (!seg) {
-        setError('このセグメントの録音データがありません。');
-        return;
-      }
-      triggerBlobDownload(seg.blob, filenameForSegment(seg));
-    } catch (e) {
-      console.error('segment download failed:', e);
-      setError('録音のダウンロードに失敗しました。');
-    } finally {
-      setAudioBusyId(null);
-    }
-  };
 
   const downloadAllAudioZip = async () => {
     setAudioBusyId('__all__');
@@ -1059,145 +997,14 @@ export default function Home() {
 
 
   const renderEntryCard = (entry: TranscriptEntry) => {
-    const translating = translatingIds.has(entry.id);
-    const showTranslate = isEnglishEntry(entry) && !entry.textJa;
-    const speakerId = entry.speakerId;
-    const isRenaming = renamingEntryId === entry.id && speakerId != null;
-    const showZoomSpeakerUi = audioSource === 'system';
-    const showMicRoleUi = audioSource === 'mic';
     return (
       <li key={entry.id} className={styles.entry}>
-        <div className={styles.entryMeta}>
-          <div className={styles.entryMetaLeft}>
-            {/* Index chrome only — no speaker controls on #N */}
-            <span className={styles.entryIndex} aria-hidden="false">
-              #{entry.note}
-            </span>
-            <span className={styles.langBadge}>{entry.lang}</span>
-            <time className={styles.entryTime} dateTime={entry.at}>
-              {formatTime(entry.at)}
-            </time>
-          </div>
-          <div className={styles.entryActions}>
-            {showTranslate && (
-              <button
-                type="button"
-                className={styles.translateButton}
-                disabled={translating}
-                onClick={() => translateEntry(entry)}
-              >
-                {translating ? 'Ollama翻訳中…' : 'Ollamaでローカル翻訳'}
-              </button>
-            )}
-            {audioIds.has(entry.id) && (
-              <button
-                type="button"
-                className={styles.copyButton}
-                disabled={audioBusyId === entry.id}
-                onClick={() => downloadSegmentAudio(entry.id)}
-              >
-                {audioBusyId === entry.id ? '準備中…' : '録音をダウンロード'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.copyButton}
-              onClick={() => copyText(entry.id, formatEntryForCopy(entry))}
-            >
-              {copiedId === entry.id ? 'Copied' : 'Copy'}
-            </button>
-          </div>
+        <div className={styles.entryMetaMinimal}>
+          <span className={styles.entryIndex}>#{entry.note}</span>
+          <time className={styles.entryTime} dateTime={entry.at}>
+            {formatTime(entry.at)}
+          </time>
         </div>
-
-        {(showMicRoleUi || showZoomSpeakerUi) && (
-          <div className={styles.speakerRow} aria-label="話者">
-            {showMicRoleUi && (
-              <div className={styles.roleToggle} role="group" aria-label="マイク役割">
-                {MIC_ROLES.map((role) => (
-                  <button
-                    key={role.id}
-                    type="button"
-                    className={
-                      speakerId === role.id
-                        ? styles.roleButtonActive
-                        : styles.roleButton
-                    }
-                    aria-pressed={speakerId === role.id}
-                    onClick={() =>
-                      setEntrySpeaker(entry.id, role.id, role.label)
-                    }
-                  >
-                    {role.label}
-                  </button>
-                ))}
-              </div>
-            )}
-            {showZoomSpeakerUi && (
-              <>
-                {isRenaming && speakerId != null ? (
-                  <form
-                    className={styles.speakerRenameForm}
-                    onSubmit={(ev) => {
-                      ev.preventDefault();
-                      renameSpeaker(speakerId, renameDraft);
-                    }}
-                  >
-                    <input
-                      className={styles.speakerRenameInput}
-                      value={renameDraft}
-                      onChange={(ev) => setRenameDraft(ev.target.value)}
-                      placeholder={letterForSpeakerId(speakerId)}
-                      aria-label="話者名（改名）"
-                      autoFocus
-                    />
-                    <button type="submit" className={styles.copyButton}>
-                      保存
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.copyButton}
-                      onClick={() => {
-                        setRenamingEntryId(null);
-                        setRenameDraft('');
-                      }}
-                    >
-                      取消
-                    </button>
-                  </form>
-                ) : (
-                  <div className={styles.letterToggle} role="group" aria-label="話者 A〜G">
-                    {SPEAKER_LETTERS.map((letter, idx) => {
-                      const id = idx + 1;
-                      return (
-                        <button
-                          key={letter}
-                          type="button"
-                          className={
-                            speakerId === id
-                              ? styles.letterButtonActive
-                              : styles.letterButton
-                          }
-                          aria-pressed={speakerId === id}
-                          onClick={() => setEntrySpeaker(entry.id, id)}
-                          onDoubleClick={() => {
-                            setRenamingEntryId(entry.id);
-                            setRenameDraft(speakerLabels[String(id)] || '');
-                          }}
-                          title="クリックで選択 / ダブルクリックで改名"
-                        >
-                          {speakerId === id
-                            ? speakerDisplayName(id)
-                            : letter}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
         <pre className={styles.transcript}>{entry.text}</pre>
         {entry.textJa && (
           <div className={styles.translationBlock}>
@@ -1290,7 +1097,7 @@ export default function Home() {
               onClick={copyAll}
               disabled={entries.length === 0}
             >
-              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
             </button>
             <button
               type="button"
@@ -1591,11 +1398,6 @@ export default function Home() {
           </div>
         </div>
 
-        {audioSource === 'system' && !isRecording && (
-          <p className={styles.audioSourceHint}>
-            Zoom・LINE・その他アプリのウィンドウ / タブ / 画面を共有し、「システム音声を共有」をオンにします。取れないときは BlackHole 等でマイクへ迂回。
-          </p>
-        )}
 
         {audioSource === 'mic' && (
           <div className={styles.speakerModeBar}>
@@ -1617,9 +1419,6 @@ export default function Home() {
                 </button>
               ))}
             </div>
-            <p className={styles.diarizeHint} role="status">
-              マイクはシンプルな役割のみ。新しい文字起こしは選択中の役割に付きます。
-            </p>
           </div>
         )}
 
@@ -1698,19 +1497,7 @@ export default function Home() {
                     );
                   })}
                 </div>
-                <p className={styles.diarizeHint} role="status">
-                  話者を選んでから話します。途中で切替可。Zoom は約60秒区切りで、その間の文字は選択中話者に付きます。
-                </p>
               </div>
-            )}
-
-            {speakerMode === 'auto' && (
-              <p className={styles.diarizeHint} role="status">
-                {diarizeStatus?.active
-                  ? `自動: whisper ${diarizeStatus.mode} を優先。なければピッチで仮の A/B…。`
-                  : '自動: tinydiarize 未使用のためピッチで仮の A/B…（目安）。'}
-                {diarizeStatus?.setupHint ? ` ${diarizeStatus.setupHint}` : ''}
-              </p>
             )}
           </>
         )}
@@ -1745,7 +1532,7 @@ export default function Home() {
               onClick={copyAll}
               disabled={entries.length === 0}
             >
-              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
             </button>
             <button
               type="button"

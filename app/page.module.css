@@ -481,7 +481,15 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
+.entryMetaMinimal {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  margin-bottom: 0.45rem;
+}
+
 .entryMeta {
+
   display: flex;
   align-items: center;
   justify-content: space-between;
