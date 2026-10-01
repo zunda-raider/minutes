@@ -7,11 +7,14 @@ type LangOption = { code: string; label: string };
 
 type TranscriptEntry = {
   id: string;
+  note: number; // stable chronological note number (1 = oldest)
   text: string;
   lang: string;
   at: string; // ISO
   textJa?: string;
 };
+
+type Screen = 'home' | 'note1' | 'note2';
 
 /** How often to cut a segment and send it to Whisper while still recording. */
 const SEGMENT_MS = 25_000;
@@ -53,6 +56,7 @@ export default function Home() {
   ]);
   const [lang, setLang] = useState('ja');
   const [translateConfigured, setTranslateConfigured] = useState(false);
+  const [screen, setScreen] = useState<Screen>('home');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -157,14 +161,17 @@ export default function Home() {
 
         const text = data.text?.trim() ?? '';
         if (text.length > 0) {
-          const entry: TranscriptEntry = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            text,
-            lang: data.lang || langRef.current,
-            at: new Date().toISOString(),
-          };
-          // Newest first
-          setEntries((prev) => [entry, ...prev]);
+          setEntries((prev) => {
+            const entry: TranscriptEntry = {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              note: prev.length + 1,
+              text,
+              lang: data.lang || langRef.current,
+              at: new Date().toISOString(),
+            };
+            // Chronological store (oldest → newest)
+            return [...prev, entry];
+          });
           setError('');
         } else {
           setError('変換はできたけど、内容が空でした。');
@@ -300,13 +307,20 @@ export default function Home() {
     }
   };
 
+  const formatEntryForCopy = (e: TranscriptEntry) =>
+    e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text;
+
+  /** Always oldest → newest, independent of which Note screen is open. */
   const copyAll = async () => {
     if (entries.length === 0) return;
-    const all = entries
-      .map((e) => (e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text))
-      .join('\n\n---\n\n');
+    const chronological = [...entries].sort((a, b) => a.note - b.note);
+    const all = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
     await copyText('__all__', all);
   };
+
+  const latestEntry = entries.length > 0 ? entries[entries.length - 1] : null;
+  const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
+  const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
 
   const clearAll = () => {
     setEntries([]);
@@ -358,6 +372,182 @@ export default function Home() {
     }
   };
 
+
+  const renderEntryCard = (entry: TranscriptEntry) => {
+    const translating = translatingIds.has(entry.id);
+    const showTranslate = isEnglishEntry(entry) && !entry.textJa;
+    return (
+      <li key={entry.id} className={styles.entry}>
+        <div className={styles.entryMeta}>
+          <div className={styles.entryMetaLeft}>
+            <span className={styles.entryIndex}>#{entry.note}</span>
+            <span className={styles.langBadge}>{entry.lang}</span>
+            <time className={styles.entryTime} dateTime={entry.at}>
+              {formatTime(entry.at)}
+            </time>
+          </div>
+          <div className={styles.entryActions}>
+            {showTranslate && (
+              <button
+                type="button"
+                className={styles.translateButton}
+                disabled={translating}
+                onClick={() => translateEntry(entry)}
+              >
+                {translating ? 'Translating…' : 'To Japanese'}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.copyButton}
+              onClick={() => copyText(entry.id, formatEntryForCopy(entry))}
+            >
+              {copiedId === entry.id ? 'Copied' : 'Copy'}
+            </button>
+          </div>
+        </div>
+        <pre className={styles.transcript}>{entry.text}</pre>
+        {entry.textJa && (
+          <div className={styles.translationBlock}>
+            <div className={styles.translationLabel}>Japanese</div>
+            <pre className={styles.transcriptJa}>{entry.textJa}</pre>
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  const renderNoteScreen = (
+    title: string,
+    subtitle: string,
+    list: TranscriptEntry[]
+  ) => (
+    <div className={styles.app}>
+      <div className={styles.bgGlow} aria-hidden="true" />
+
+      <header className={styles.noteTopBar}>
+        <button
+          type="button"
+          className={styles.backButton}
+          onClick={() => setScreen('home')}
+        >
+          <span className={styles.backChevron} aria-hidden="true" />
+          Home
+        </button>
+        <div className={styles.noteHeading}>
+          <h1 className={styles.title}>{title}</h1>
+          <p className={styles.subtitle}>{subtitle}</p>
+        </div>
+        <div className={styles.topMeta}>
+          <span className={styles.metaChip}>{entries.length} segments</span>
+          <span className={styles.metaChip}>Copy all = 古い順</span>
+        </div>
+      </header>
+
+      {(isRecording || isTranscribing) && (
+        <div className={styles.liveStrip} aria-live="polite">
+          {isRecording && (
+            <span className={styles.pillLive}>
+              <span className={styles.dotPulse} aria-hidden="true" />
+              Recording continues
+            </span>
+          )}
+          {isTranscribing && (
+            <span className={styles.pillQueue}>
+              <span className={styles.dotAmber} aria-hidden="true" />
+              Transcribing · {pendingCount}
+            </span>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
+
+      <section className={styles.feed}>
+        <div className={styles.feedHeader}>
+          <div>
+            <h2 className={styles.feedTitle}>Timeline</h2>
+            <p className={styles.feedCount}>
+              {list.length === 0
+                ? 'No segments yet'
+                : `Showing ${list.length} · # stays chronological`}
+            </p>
+          </div>
+          <div className={styles.feedActions}>
+            {untranslatedEn.length > 0 && (
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={translateAllEnglish}
+                disabled={translatingIds.size > 0}
+              >
+                {translateConfigured
+                  ? `Translate all EN (${untranslatedEn.length})`
+                  : 'Translate all EN'}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={copyAll}
+              disabled={entries.length === 0}
+            >
+              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButtonDanger}
+              onClick={clearAll}
+              disabled={entries.length === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {list.length === 0 ? (
+          <div className={styles.emptyState}>
+            <div className={styles.emptyOrb} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>No notes yet</h3>
+            <p className={styles.emptyBody}>
+              Go back Home, hit Record, and segments will appear here as a
+              browsable timeline.
+            </p>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={() => setScreen('home')}
+            >
+              Back to Home
+            </button>
+          </div>
+        ) : (
+          <ul className={styles.entryList}>{list.map(renderEntryCard)}</ul>
+        )}
+      </section>
+    </div>
+  );
+
+  if (screen === 'note1') {
+    return renderNoteScreen(
+      'Note 1',
+      '古い順 · oldest → newest',
+      note1Entries
+    );
+  }
+
+  if (screen === 'note2') {
+    return renderNoteScreen(
+      'Note 2',
+      '新しい順 · newest → oldest',
+      note2Entries
+    );
+  }
+
   return (
     <div className={styles.app}>
       <div className={styles.bgGlow} aria-hidden="true" />
@@ -372,7 +562,7 @@ export default function Home() {
         </div>
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
-          <span className={styles.metaChip}>Newest first</span>
+          <span className={styles.metaChip}>{entries.length} saved</span>
         </div>
       </header>
 
@@ -449,110 +639,66 @@ export default function Home() {
         )}
       </aside>
 
-      <section className={styles.feed}>
-        <div className={styles.feedHeader}>
-          <div>
-            <h2 className={styles.feedTitle}>Transcript</h2>
-            <p className={styles.feedCount}>{entries.length} segments</p>
-          </div>
-          <div className={styles.feedActions}>
-            {untranslatedEn.length > 0 && (
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={translateAllEnglish}
-                disabled={translatingIds.size > 0}
-              >
-                {translateConfigured
-                  ? `Translate all EN (${untranslatedEn.length})`
-                  : 'Translate all EN'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={copyAll}
-              disabled={entries.length === 0}
-            >
-              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButtonDanger}
-              onClick={clearAll}
-              disabled={entries.length === 0}
-            >
-              Clear
-            </button>
-          </div>
+      <section className={styles.homePreview}>
+        <div className={styles.previewHeader}>
+          <h2 className={styles.feedTitle}>Latest</h2>
+          <p className={styles.feedCount}>Live peek · full history in Notes</p>
         </div>
-
-        {entries.length === 0 ? (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyOrb} aria-hidden="true" />
-            <h3 className={styles.emptyTitle}>
-              {isTranscribing ? 'Waiting for the first segment' : 'Ready when you are'}
-            </h3>
+        {latestEntry ? (
+          <article className={styles.previewCard}>
+            <div className={styles.entryMeta}>
+              <div className={styles.entryMetaLeft}>
+                <span className={styles.entryIndex}>#{latestEntry.note}</span>
+                <span className={styles.langBadge}>{latestEntry.lang}</span>
+                <time className={styles.entryTime} dateTime={latestEntry.at}>
+                  {formatTime(latestEntry.at)}
+                </time>
+              </div>
+            </div>
+            <pre className={styles.transcript}>{latestEntry.text}</pre>
+          </article>
+        ) : (
+          <div className={styles.emptyStateCompact}>
             <p className={styles.emptyBody}>
               {isTranscribing
-                ? 'Audio is queued for Whisper. New text will appear here.'
-                : 'Hit Record to capture mic audio. Segments land here newest-first; English lines can be translated to Japanese.'}
+                ? 'First segment is on the way…'
+                : 'Nothing yet. Start recording to capture the meeting.'}
             </p>
           </div>
-        ) : (
-          <ul className={styles.entryList}>
-            {entries.map((entry, index) => {
-              const translating = translatingIds.has(entry.id);
-              const showTranslate = isEnglishEntry(entry) && !entry.textJa;
-              return (
-                <li key={entry.id} className={styles.entry}>
-                  <div className={styles.entryMeta}>
-                    <div className={styles.entryMetaLeft}>
-                      <span className={styles.entryIndex}>#{index + 1}</span>
-                      <span className={styles.langBadge}>{entry.lang}</span>
-                      <time className={styles.entryTime} dateTime={entry.at}>
-                        {formatTime(entry.at)}
-                      </time>
-                    </div>
-                    <div className={styles.entryActions}>
-                      {showTranslate && (
-                        <button
-                          type="button"
-                          className={styles.translateButton}
-                          disabled={translating}
-                          onClick={() => translateEntry(entry)}
-                        >
-                          {translating ? 'Translating…' : 'To Japanese'}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.copyButton}
-                        onClick={() =>
-                          copyText(
-                            entry.id,
-                            entry.textJa
-                              ? `${entry.text}\n\n（日本語）\n${entry.textJa}`
-                              : entry.text
-                          )
-                        }
-                      >
-                        {copiedId === entry.id ? 'Copied' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                  <pre className={styles.transcript}>{entry.text}</pre>
-                  {entry.textJa && (
-                    <div className={styles.translationBlock}>
-                      <div className={styles.translationLabel}>Japanese</div>
-                      <pre className={styles.transcriptJa}>{entry.textJa}</pre>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
         )}
+      </section>
+
+      <section className={styles.noteGate}>
+        <h2 className={styles.feedTitle}>Open notes</h2>
+        <p className={styles.gateHint}>
+          Same history, two reading layouts. Copy all always pastes oldest → newest.
+        </p>
+        <div className={styles.noteCards}>
+          <button
+            type="button"
+            className={styles.noteCard}
+            onClick={() => setScreen('note1')}
+          >
+            <span className={styles.noteCardKicker}>Note 1</span>
+            <span className={styles.noteCardTitle}>古い順</span>
+            <span className={styles.noteCardDesc}>
+              Timeline from the start of the meeting — best for reading & pasting.
+            </span>
+            <span className={styles.noteCardCta}>Open →</span>
+          </button>
+          <button
+            type="button"
+            className={styles.noteCard}
+            onClick={() => setScreen('note2')}
+          >
+            <span className={styles.noteCardKicker}>Note 2</span>
+            <span className={styles.noteCardTitle}>新しい順</span>
+            <span className={styles.noteCardDesc}>
+              Newest segments on top — best while the meeting is still running.
+            </span>
+            <span className={styles.noteCardCta}>Open →</span>
+          </button>
+        </div>
       </section>
     </div>
   );
