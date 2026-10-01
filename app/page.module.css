@@ -1160,6 +1160,71 @@
 }
 
 
+.speakerBadge,
+.speakerBadgeMuted {
+  appearance: none;
+  border: 1px solid rgba(124, 92, 255, 0.4);
+  background: rgba(124, 92, 255, 0.18);
+  color: #e9e2ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-height: 28px;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.speakerBadgeMuted {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.speakerCycle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.speakerRenameForm {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.speakerRenameInput {
+  min-height: 30px;
+  min-width: 7rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.speakerModeBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.diarizeHint {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
 .audioSourceHint {
   margin: 0.75rem 0 0;
   color: var(--muted);
