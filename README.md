@@ -32,7 +32,8 @@ cp .env.example .env.local
 | `WHISPER_LANG` | No | デフォルト言語（省略時 `ja`） |
 | `WHISPER_LANGS` | No | 許可言語リスト（省略時 `ja,en`） |
 | `OLLAMA_BASE_URL` | No | Ollama URL（省略時 `http://127.0.0.1:11434`） |
-| `OLLAMA_MODEL` | No | Ollama モデル（省略時 `llama3.2`） |
+| `OLLAMA_MODEL` | No | 省略時 `llama3.2`（代替例: `gemma2`） |
+| `OLLAMA_BIN` | No | ollama 実行ファイル（例: `/usr/local/bin/ollama`） |
 | `TRANSLATE_PROVIDER` | No | `auto`（Ollama→OpenAI）/ `ollama` / `openai` |
 | `OPENAI_API_KEY` | No | 任意のフォールバック用 |
 
@@ -56,6 +57,7 @@ WHISPER_LANG=ja
 WHISPER_LANGS=ja,en
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2
+OLLAMA_BIN=/usr/local/bin/ollama
 ```
 
 ### Linux の例
@@ -71,13 +73,14 @@ WHISPER_LANGS=ja,en
 
 ## Ollama ローカル翻訳
 
-英語セグメントの「Ollamaでローカル翻訳」は、既定でローカル [Ollama](https://ollama.com) を使います。
+英語セグメントの「Ollamaでローカル翻訳」は、既定でローカル [Ollama](https://ollama.com) を使います（デフォルトモデル: **llama3.2**。代替: **gemma2**）。
 
 ```bash
 # macOS
 brew install ollama
-ollama serve          # 別ターミナルで常駐
-ollama pull llama3.2  # または好きなモデル名を OLLAMA_MODEL に合わせる
+ollama pull llama3.2   # 推奨デフォルト
+ollama pull gemma2     # 任意
+# この Mac の例: binary=/usr/local/bin/ollama / models=llama3.2:latest, gemma2:latest
 ```
 
 `.env.local` 例:
@@ -86,11 +89,20 @@ ollama pull llama3.2  # または好きなモデル名を OLLAMA_MODEL に合わ
 TRANSLATE_PROVIDER=auto
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2
+# OLLAMA_MODEL=gemma2
+OLLAMA_BIN=/usr/local/bin/ollama
 # 任意: Ollama 失敗時のフォールバック
 # OPENAI_API_KEY=sk-...
 ```
 
-Ollama 未起動時は API が接続エラーを返し、UI に表示します。
+### 自動起動（ローカル Next のみ）
+
+`npm run dev` / `next start` で動かす **Node サーバー側**の `/api/translate` は、翻訳前に `http://127.0.0.1:11434` を確認し、ダウンしていれば `OLLAMA_BIN`（なければ `/usr/local/bin/ollama` や PATH の `ollama`）で `ollama serve` をデタッチ起動して短時間リトライします。
+
+- **できる:** ローカルで Next を動かしているとき
+- **できない:** ブラウザだけで Ollama を起動すること、Vercel 等のサーバーレス
+
+起動に失敗した場合は、brew パス（`/usr/local/bin/ollama serve`）を含むエラーを UI に出します。
 
 ## 起動
 

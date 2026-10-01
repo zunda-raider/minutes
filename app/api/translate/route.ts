@@ -1,4 +1,9 @@
 import { NextResponse } from 'next/server';
+import {
+  ensureOllamaRunning,
+  getOllamaBaseUrl,
+  getOllamaModel,
+} from '@/lib/ollama';
 
 export const runtime = 'nodejs';
 
@@ -13,16 +18,6 @@ function getOpenAiKey(): string | null {
   );
 }
 
-function getOllamaBaseUrl(): string {
-  return (
-    process.env.OLLAMA_BASE_URL?.trim() || 'http://127.0.0.1:11434'
-  ).replace(/\/$/, '');
-}
-
-function getOllamaModel(): string {
-  return process.env.OLLAMA_MODEL?.trim() || 'llama3.2';
-}
-
 type Provider = 'ollama' | 'openai' | 'auto';
 
 function getProvider(): Provider {
@@ -34,6 +29,9 @@ function getProvider(): Provider {
 async function translateWithOllama(text: string): Promise<string> {
   const baseUrl = getOllamaBaseUrl();
   const model = getOllamaModel();
+
+  // Local Next server only: wake Ollama if needed
+  await ensureOllamaRunning(baseUrl);
 
   let res: Response;
   try {
@@ -64,7 +62,7 @@ async function translateWithOllama(text: string): Promise<string> {
   if (!res.ok) {
     throw new Error(
       data.error ||
-        `Ollama API error (${res.status}). モデル \`${model}\` があるか \`ollama pull ${model}\` を試してください。`
+        `Ollama API error (${res.status}). モデル \`${model}\` があるか \`ollama pull ${model}\`（例: llama3.2 / gemma2）を試してください。`
     );
   }
 
