@@ -4,6 +4,11 @@ import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
 import { getWhisperLangConfig, resolveRequestLang } from '@/lib/whisper-lang';
+import {
+  getDiarizeConfig,
+  parseDiarizedTranscript,
+  stripTimestamps,
+} from '@/lib/whisper-diarize';
 
 export const runtime = 'nodejs';
 
@@ -45,18 +50,13 @@ function runProcess(
   });
 }
 
-function stripTimestamps(raw: string): string {
-  return raw
-    .replace(/\[\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\]\s*/g, '')
-    .trim();
-}
-
 export async function POST(req: Request) {
   const whisperBin = requireEnv('WHISPER_BIN');
   const whisperModel = requireEnv('WHISPER_MODEL');
   const ffmpegBin = requireEnv('FFMPEG_BIN') ?? 'ffmpeg';
   const tempDir = requireEnv('TEMP_DIR') ?? path.join(os.tmpdir(), 'minutes-temp');
   const langConfig = getWhisperLangConfig();
+  const diarize = getDiarizeConfig(whisperModel ?? '');
 
   if (!whisperBin || !whisperModel) {
     return NextResponse.json(
@@ -113,15 +113,57 @@ export async function POST(req: Request) {
       'ffmpeg'
     );
 
-    const { stdout } = await runProcess(
-      whisperBin,
-      ['-m', whisperModel, '-f', wavPath, '-l', whisperLang],
-      'whisper-cli'
-    );
+    const baseArgs = ['-m', whisperModel, '-f', wavPath, '-l', whisperLang];
+    const wantDiarizeArgs = diarize.enabled && diarize.args.length > 0;
+    let diarizeWarning: string | null = diarize.setupHint;
+    let usedDiarize = false;
+    let stdout = '';
 
-    const plainText = stripTimestamps(stdout);
+    if (wantDiarizeArgs) {
+      try {
+        const result = await runProcess(
+          whisperBin,
+          [...baseArgs, ...diarize.args],
+          'whisper-cli'
+        );
+        stdout = result.stdout;
+        usedDiarize = true;
+      } catch (diarizeErr) {
+        console.warn('diarize whisper failed; retrying without:', diarizeErr);
+        const msg =
+          diarizeErr instanceof Error ? diarizeErr.message : String(diarizeErr);
+        diarizeWarning =
+          (diarizeWarning ? diarizeWarning + ' ' : '') +
+          `自動話者分けオプションが使えないため通常文字起こしにフォールバックしました。（${msg.slice(0, 180)}）`;
+        const result = await runProcess(whisperBin, baseArgs, 'whisper-cli');
+        stdout = result.stdout;
+        usedDiarize = false;
+      }
+    } else {
+      const result = await runProcess(whisperBin, baseArgs, 'whisper-cli');
+      stdout = result.stdout;
+    }
 
-    return NextResponse.json({ text: plainText, lang: whisperLang });
+    const parsed = parseDiarizedTranscript(stdout);
+    const plainText =
+      parsed.plainText ||
+      stripTimestamps(stdout)
+        .replace(/\s*\[SPEAKER_TURN\]/gi, '')
+        .replace(/\s*\[_SOLM_\]/gi, '')
+        .trim();
+
+    return NextResponse.json({
+      text: plainText,
+      lang: whisperLang,
+      turns: parsed.turns,
+      hasDiarizeMarks: parsed.hasDiarizeMarks,
+      diarize: {
+        requested: diarize.enabled,
+        mode: diarize.mode,
+        used: usedDiarize,
+        warning: diarizeWarning,
+      },
+    });
   } catch (err) {
     console.error('transcribe error:', err);
     const message = err instanceof Error ? err.message : '文字起こしに失敗しました。';

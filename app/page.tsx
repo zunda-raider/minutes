@@ -4,14 +4,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
 import {
   clearStoredEntries,
+  clearStoredSpeakerLabels,
   clearStoredSummary,
   loadEntries,
   loadGenre,
+  loadSpeakerLabels,
   loadSummary,
   saveEntries,
   saveGenre,
+  saveSpeakerLabels,
   saveSummary,
+  type SpeakerLabels,
 } from '@/lib/history-storage';
+import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   clearAllAudio,
   filenameForSegment,
@@ -32,6 +37,15 @@ type TranscriptEntry = {
   lang: string;
   at: string; // ISO
   textJa?: string;
+  /** 1-based speaker id */
+  speakerId?: number;
+};
+
+type DiarizeStatus = {
+  enabled: boolean;
+  mode: string;
+  active: boolean;
+  setupHint: string | null;
 };
 
 type Screen = 'home' | 'note1' | 'note2';
@@ -93,6 +107,10 @@ export default function Home() {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
+  const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
+  const [diarizeStatus, setDiarizeStatus] = useState<DiarizeStatus | null>(null);
+  const [renamingEntryId, setRenamingEntryId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);
@@ -112,6 +130,7 @@ export default function Home() {
   const uploadQueueRef = useRef<Blob[]>([]);
   const queueRunningRef = useRef(false);
   const entriesLenRef = useRef(0);
+  const lastSpeakerRef = useRef<number | null>(null);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -128,6 +147,12 @@ export default function Home() {
           defaultLang?: string;
           langs?: LangOption[];
           translateConfigured?: boolean;
+          diarize?: {
+            enabled?: boolean;
+            mode?: string;
+            active?: boolean;
+            setupHint?: string | null;
+          };
         };
         if (cancelled) return;
         if (Array.isArray(data.langs) && data.langs.length > 0) {
@@ -137,6 +162,14 @@ export default function Home() {
           setLang(data.defaultLang);
         }
         setTranslateConfigured(Boolean(data.translateConfigured));
+        if (data.diarize) {
+          setDiarizeStatus({
+            enabled: Boolean(data.diarize.enabled),
+            mode: data.diarize.mode || 'off',
+            active: Boolean(data.diarize.active),
+            setupHint: data.diarize.setupHint ?? null,
+          });
+        }
       } catch (e) {
         console.error('config fetch failed:', e);
       }
@@ -158,6 +191,7 @@ export default function Home() {
     setEntries(loadEntries());
     setSummary(loadSummary());
     setGenre(loadGenre());
+    setSpeakerLabels(loadSpeakerLabels());
     setHistoryReady(true);
     void listAudioIds()
       .then((ids) => setAudioIds(new Set(ids)))
@@ -200,6 +234,15 @@ export default function Home() {
     }
   }, [genre, historyReady]);
 
+  useEffect(() => {
+    if (!historyReady) return;
+    try {
+      saveSpeakerLabels(speakerLabels);
+    } catch {
+      setError('話者名の保存に失敗しました。');
+    }
+  }, [speakerLabels, historyReady]);
+
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -231,7 +274,19 @@ export default function Home() {
           body: formData,
         });
 
-        let data: { text?: string; error?: string; lang?: string };
+        let data: {
+          text?: string;
+          error?: string;
+          lang?: string;
+          turns?: DiarizeTurn[];
+          hasDiarizeMarks?: boolean;
+          diarize?: {
+            requested?: boolean;
+            mode?: string;
+            used?: boolean;
+            warning?: string | null;
+          };
+        };
         try {
           data = await res.json();
         } catch (parseErr) {
@@ -247,35 +302,68 @@ export default function Home() {
           continue;
         }
 
+        if (data.diarize?.warning) {
+          setError(data.diarize.warning);
+        }
+
         const text = data.text?.trim() ?? '';
         const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const at = new Date().toISOString();
         const mimeType = blob.type || mimeTypeRef.current || 'audio/webm';
+        const lang = data.lang || langRef.current;
 
-        if (text.length > 0) {
-          const note = entriesLenRef.current + 1;
-          const entry: TranscriptEntry = {
-            id,
-            note,
-            text,
-            lang: data.lang || langRef.current,
-            at,
-          };
-          setEntries((prev) => [...prev, entry]);
-          entriesLenRef.current = note;
-          try {
-            await saveAudioSegment({
-              id: entry.id,
-              note: entry.note,
-              at: entry.at,
-              mimeType,
-              blob,
+        const rawTurns =
+          Array.isArray(data.turns) && data.turns.length > 0
+            ? data.turns
+            : text
+              ? [{ speaker: lastSpeakerRef.current ?? 1, text }]
+              : [];
+        const { turns, lastSpeaker } = remapSpeakersContinuity(
+          rawTurns,
+          lastSpeakerRef.current
+        );
+        if (lastSpeaker != null) lastSpeakerRef.current = lastSpeaker;
+
+        if (text.length > 0 || turns.some((t) => t.text.trim())) {
+          const chunks =
+            turns.length > 0
+              ? turns
+              : [{ speaker: lastSpeakerRef.current ?? 1, text }];
+          const newEntries: TranscriptEntry[] = [];
+          let note = entriesLenRef.current;
+          for (const turn of chunks) {
+            const turnText = turn.text.trim();
+            if (!turnText) continue;
+            note += 1;
+            newEntries.push({
+              id:
+                newEntries.length === 0
+                  ? id
+                  : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              note,
+              text: turnText,
+              lang,
+              at,
+              speakerId: turn.speaker,
             });
-            setAudioIds((prev) => new Set(prev).add(entry.id));
-          } catch (audioErr) {
-            console.error('audio save failed:', audioErr);
           }
-          setError('');
+          if (newEntries.length > 0) {
+            setEntries((prev) => [...prev, ...newEntries]);
+            entriesLenRef.current = note;
+            try {
+              await saveAudioSegment({
+                id: newEntries[0]!.id,
+                note: newEntries[0]!.note,
+                at,
+                mimeType,
+                blob,
+              });
+              setAudioIds((prev) => new Set(prev).add(newEntries[0]!.id));
+            } catch (audioErr) {
+              console.error('audio save failed:', audioErr);
+            }
+            if (!data.diarize?.warning) setError('');
+          }
         } else {
           // Keep empty / near-silent segment audio for session download.
           try {
@@ -483,8 +571,40 @@ export default function Home() {
     }
   };
 
-  const formatEntryForCopy = (e: TranscriptEntry) =>
-    e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text;
+  const speakerDisplayName = (speakerId?: number) => {
+    if (speakerId == null) return '話者?';
+    const custom = speakerLabels[String(speakerId)];
+    return custom?.trim() || `話者${speakerId}`;
+  };
+
+  const formatEntryForCopy = (e: TranscriptEntry) => {
+    const label = e.speakerId != null ? `[${speakerDisplayName(e.speakerId)}] ` : '';
+    const body = e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text;
+    return `${label}${body}`;
+  };
+
+  const renameSpeaker = (speakerId: number, name: string) => {
+    const trimmed = name.trim();
+    setSpeakerLabels((prev) => {
+      const next = { ...prev };
+      if (!trimmed) delete next[String(speakerId)];
+      else next[String(speakerId)] = trimmed;
+      return next;
+    });
+    setRenamingEntryId(null);
+    setRenameDraft('');
+  };
+
+  const cycleSpeaker = (entryId: string) => {
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.id !== entryId) return e;
+        const cur = e.speakerId ?? 0;
+        const next = cur >= 8 ? 1 : cur + 1;
+        return { ...e, speakerId: next };
+      })
+    );
+  };
 
   /** Always oldest → newest, independent of which Note screen is open. */
   const copyAll = async () => {
@@ -502,8 +622,11 @@ export default function Home() {
     setSummary('');
     setCopiedId(null);
     setAudioIds(new Set());
+    setSpeakerLabels({});
+    lastSpeakerRef.current = null;
     clearStoredEntries();
     clearStoredSummary();
+    clearStoredSpeakerLabels();
     void clearAllAudio().catch((err) => console.error('audio clear failed:', err));
   };
 
@@ -564,7 +687,9 @@ export default function Home() {
     const chronological = [...entries].sort((a, b) => a.note - b.note);
     return chronological
       .map((e) => {
-        const header = `#${e.note} [${e.lang}] ${e.at}`;
+        const sp =
+          e.speakerId != null ? ` ${speakerDisplayName(e.speakerId)}` : '';
+        const header = `#${e.note}${sp} [${e.lang}] ${e.at}`;
         if (e.textJa) {
           return `${header}\n${e.text}\n(日本語訳)\n${e.textJa}`;
         }
@@ -767,11 +892,77 @@ export default function Home() {
   const renderEntryCard = (entry: TranscriptEntry) => {
     const translating = translatingIds.has(entry.id);
     const showTranslate = isEnglishEntry(entry) && !entry.textJa;
+    const speakerId = entry.speakerId;
+    const isRenaming = renamingEntryId === entry.id && speakerId != null;
     return (
       <li key={entry.id} className={styles.entry}>
         <div className={styles.entryMeta}>
           <div className={styles.entryMetaLeft}>
             <span className={styles.entryIndex}>#{entry.note}</span>
+            {speakerId != null ? (
+              isRenaming ? (
+                <form
+                  className={styles.speakerRenameForm}
+                  onSubmit={(ev) => {
+                    ev.preventDefault();
+                    renameSpeaker(speakerId, renameDraft);
+                  }}
+                >
+                  <input
+                    className={styles.speakerRenameInput}
+                    value={renameDraft}
+                    onChange={(ev) => setRenameDraft(ev.target.value)}
+                    placeholder={`話者${speakerId}`}
+                    aria-label="話者名"
+                    autoFocus
+                  />
+                  <button type="submit" className={styles.copyButton}>
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.copyButton}
+                    onClick={() => {
+                      setRenamingEntryId(null);
+                      setRenameDraft('');
+                    }}
+                  >
+                    取消
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  className={styles.speakerBadge}
+                  title="タップで名前を変更"
+                  onClick={() => {
+                    setRenamingEntryId(entry.id);
+                    setRenameDraft(speakerLabels[String(speakerId)] || '');
+                  }}
+                >
+                  {speakerDisplayName(speakerId)}
+                </button>
+              )
+            ) : (
+              <button
+                type="button"
+                className={styles.speakerBadgeMuted}
+                onClick={() => cycleSpeaker(entry.id)}
+                title="話者を割り当て"
+              >
+                話者を設定
+              </button>
+            )}
+            {speakerId != null && !isRenaming && (
+              <button
+                type="button"
+                className={styles.speakerCycle}
+                onClick={() => cycleSpeaker(entry.id)}
+                title="話者番号を切替"
+              >
+                切替
+              </button>
+            )}
             <span className={styles.langBadge}>{entry.lang}</span>
             <time className={styles.entryTime} dateTime={entry.at}>
               {formatTime(entry.at)}
@@ -1203,6 +1394,17 @@ export default function Home() {
         {audioSource === 'system' && !isRecording && (
           <p className={styles.audioSourceHint}>
             Zoom・LINE・その他アプリのウィンドウ / タブ / 画面を共有し、「システム音声を共有」をオンにします。取れないときは BlackHole 等でマイクへ迂回。
+          </p>
+        )}
+
+        {diarizeStatus && (
+          <p className={styles.diarizeHint} role="status">
+            {diarizeStatus.active
+              ? `話者分け: 自動オン（${diarizeStatus.mode}）— ラベルはタップで改名できます`
+              : diarizeStatus.enabled
+                ? `話者分け: 手動のみ（自動は未設定）`
+                : '話者分け: 手動ラベル可（自動は WHISPER_DIARIZE=1）'}
+            {diarizeStatus.setupHint ? ` — ${diarizeStatus.setupHint}` : ''}
           </p>
         )}
 

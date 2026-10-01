@@ -3,7 +3,7 @@
 マイク音声を録音し、ローカルの [whisper.cpp](https://github.com/ggerganov/whisper.cpp) で文字起こしする Next.js アプリです。
 
 > **Note:** マイク録音に加え、**Zoom・LINE・その他アプリ / システム音声**（`getDisplayMedia` + システム音声）に対応。  
-> 話者分離・バックグラウンド常駐は今後の予定 (P2/P3) です。
+> 話者分け（手動ラベル + 任意で tinydiarize / embedding）対応。バックグラウンド常駐は P3。
 
 ## 必要なもの
 
@@ -36,6 +36,11 @@ cp .env.example .env.local
 | `OLLAMA_BIN` | No | ollama 実行ファイル（例: `/usr/local/bin/ollama`） |
 | `TRANSLATE_PROVIDER` | No | `auto`（Ollama→OpenAI）/ `ollama` / `openai` |
 | `OPENAI_API_KEY` | No | 任意のフォールバック用 |
+| `WHISPER_DIARIZE` | No | `1` で自動話者分けを試行 |
+| `WHISPER_DIARIZE_MODE` | No | `tdrz` / `embedding` / `extra` |
+| `WHISPER_SPEAKER_MODEL` | No | embedding 用スピーカーモデル |
+| `WHISPER_DIARIZE_ARGS` | No | whisper-cli 追加引数 |
+
 
 ### Windows の例
 
@@ -120,6 +125,45 @@ npm run dev
 
 Home の「ジャンル / 文脈」欄に会議の種類を自由入力できます（localStorage に保存）。空欄なら従来どおり。入力があると `/api/translate` と `/api/summarize` のプロンプトに渡し、用語・要約の精度を上げます。
 
+
+## 話者分け（diarization）
+
+セグメントごとに **話者1 / 話者2…** バッジを表示し、タップで名前変更（localStorage `minutes.speakers.labels.v1`）。番号の「切替」や未設定時の「話者を設定」で手動割り当てできます。
+
+### 自動話者分け（任意）
+
+現在の既定モデル（例: `ggml-large-v3-turbo-q8_0.bin`）は **tinydiarize 非対応**です。自動を使う場合:
+
+1. **tinydiarize（推奨・実験的・英語）**
+   ```bash
+   # whisper.cpp
+   ./models/download-ggml-model.sh small.en-tdrz
+   ```
+   `.env.local`:
+   ```env
+   WHISPER_DIARIZE=1
+   WHISPER_DIARIZE_MODE=tdrz
+   WHISPER_MODEL=/path/to/ggml-small.en-tdrz.bin
+   WHISPER_LANG=en
+   ```
+   `whisper-cli` に `-tdrz` を付け、出力の `[SPEAKER_TURN]` を解析して話者を交互に付与します。
+
+2. **embedding diarize**（whisper.cpp を diarize 対応ビルドしスピーカーモデルがある場合）
+   ```env
+   WHISPER_DIARIZE=1
+   WHISPER_DIARIZE_MODE=embedding
+   WHISPER_SPEAKER_MODEL=/path/to/ggml-speaker-ecapa-tdnn.bin
+   ```
+
+3. **任意引数**
+   ```env
+   WHISPER_DIARIZE=1
+   WHISPER_DIARIZE_MODE=extra
+   WHISPER_DIARIZE_ARGS=-tdrz
+   ```
+
+未対応フラグや未設定時は **通常の文字起こしにフォールバック**し、UI に日本語の警告を出します。手動ラベルは常に使えます。
+
 ## 録音ダウンロード
 
 セグメント音声（ブラウザ `MediaRecorder` の webm など）は **IndexedDB** に保存されます。各カードの「録音をダウンロード」、または「録音をまとめてダウンロード」で ZIP（無圧縮ストア）として一括取得できます。履歴クリアで音声も削除されます。リロード後も IndexedDB に残っている分は再ダウンロード可能です。
@@ -151,7 +195,7 @@ Home の「ジャンル / 文脈」欄に会議の種類を自由入力できま
 - **P0:** 録音バグ修正・パスの環境変数化・CSS / Node25 localStorage 修正
 - **言語切替:** UI で ja/en を選択し `whisper-cli -l` に渡す（本機能）
 - **P1:** 音声ソース切替（Zoom・LINE・他 / システム音声）✅ · チャンクアップロード · visibility 警告
-- **P2:** 話者分離 (diarization)
+- **P2:** 話者分離 (diarization) ✅（手動 + 任意 tinydiarize/embedding）
 - **P3:** Electron/Tauri などデスクトップ常駐
 
 
