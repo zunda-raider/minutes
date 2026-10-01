@@ -880,109 +880,129 @@ export default function Home() {
     }
   };
 
+  const closeSummaryPanel = () => setSummaryOpen(false);
+
   const openSummaryPanel = () => {
     setSummaryOpen(true);
     setMenuOpen(false);
-    window.setTimeout(() => {
-      summaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 50);
+    // Stay anchored to the chip — do not scroll the page away from the toggle.
   };
 
-  const renderSummaryPanel = () => (
-    <section
-      ref={summaryRef}
-      className={
-        summaryOpen ? styles.summaryPanelExpanded : styles.summaryPanelCollapsed
+  const toggleSummaryPanel = () => {
+    if (summaryOpen) closeSummaryPanel();
+    else openSummaryPanel();
+  };
+
+  useEffect(() => {
+    if (!summaryOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSummaryPanel();
       }
-    >
-      {!summaryOpen ? (
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [summaryOpen]);
+
+  const renderSummaryPanel = () => (
+    <section ref={summaryRef} className={styles.summaryAnchor}>
+      <div className={styles.summaryToggleRow}>
         <button
           type="button"
           className={styles.summaryChip}
-          onClick={openSummaryPanel}
-          aria-expanded={false}
+          onClick={toggleSummaryPanel}
+          aria-expanded={summaryOpen}
+          aria-controls="summary-popover"
         >
           <span className={styles.summaryChipLabel}>要約</span>
           <span className={styles.summaryChipMeta}>
             {isSummarizing
               ? '生成中…'
-              : summary
-                ? '保存済み · タップで展開'
-                : 'たたみ表示 · タップで開く'}
+              : summaryOpen
+                ? '開いています · タップ / Esc で閉じる'
+                : summary
+                  ? '保存済み · タップで開く'
+                  : 'たたみ表示 · タップで開く'}
           </span>
-          <span className={styles.summaryChipChevron} aria-hidden="true" />
+          <span
+            className={
+              summaryOpen ? styles.summaryChipChevronUp : styles.summaryChipChevron
+            }
+            aria-hidden="true"
+          />
         </button>
-      ) : (
+        {summaryOpen && (
+          <button
+            type="button"
+            className={styles.summaryCloseButton}
+            onClick={closeSummaryPanel}
+            aria-label="要約を閉じる"
+          >
+            ×
+          </button>
+        )}
+      </div>
+
+      {summaryOpen && (
         <>
-          <div className={styles.summaryTopRow}>
-            <button
-              type="button"
-              className={styles.summaryCollapseBar}
-              onClick={() => setSummaryOpen(false)}
-              aria-expanded={true}
-              aria-label="要約を閉じる"
-            >
-              <span className={styles.summaryChipLabel}>要約</span>
-              <span className={styles.summaryChipMeta}>
-                {isSummarizing
-                  ? '生成中…'
-                  : 'タップで閉じる'}
-              </span>
-              <span
-                className={styles.summaryChipChevronUp}
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              type="button"
-              className={styles.summaryCloseButton}
-              onClick={() => setSummaryOpen(false)}
-              aria-label="要約を閉じる"
-            >
-              ×
-            </button>
-          </div>
-          <div className={styles.summaryHeader}>
-            <p className={styles.feedCount}>
-              Ollama · 決定 / アクション / トピック
-              {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
-            </p>
-            <div className={styles.feedActions}>
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={runSummary}
-                disabled={entries.length === 0 || isSummarizing}
-              >
-                {isSummarizing ? '要約中…' : '要約を生成'}
-              </button>
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={() => summary && copyText('__summary__', summary)}
-                disabled={!summary}
-              >
-                {copiedId === '__summary__' ? 'Copied' : '要約をコピー'}
-              </button>
-              <button
-                type="button"
-                className={styles.ghostButtonDanger}
-                onClick={clearSummaryOnly}
-                disabled={!summary}
-              >
-                要約クリア
-              </button>
+          <button
+            type="button"
+            className={styles.summaryBackdrop}
+            aria-label="要約を閉じる"
+            onClick={closeSummaryPanel}
+          />
+          <div
+            id="summary-popover"
+            className={styles.summaryPopover}
+            role="dialog"
+            aria-modal="true"
+            aria-label="要約"
+          >
+            <div className={styles.summaryHeader}>
+              <p className={styles.feedCount}>
+                Ollama · 決定 / アクション / トピック
+                {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
+              </p>
+              <div className={styles.feedActions}>
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  onClick={runSummary}
+                  disabled={entries.length === 0 || isSummarizing}
+                >
+                  {isSummarizing ? '要約中…' : '要約を生成'}
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  onClick={() => summary && copyText('__summary__', summary)}
+                  disabled={!summary}
+                >
+                  {copiedId === '__summary__' ? 'Copied' : '要約をコピー'}
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostButtonDanger}
+                  onClick={clearSummaryOnly}
+                  disabled={!summary}
+                >
+                  要約クリア
+                </button>
+              </div>
+            </div>
+            <div className={styles.summaryPopoverBody}>
+              {summary ? (
+                <pre className={styles.summaryBody}>{summary}</pre>
+              ) : (
+                <p className={styles.summaryEmpty}>
+                  {entries.length === 0
+                    ? '文字起こしがあると要約できます。'
+                    : '「要約を生成」で会議の決定・アクションをまとめます。'}
+                </p>
+              )}
             </div>
           </div>
-          {summary ? (
-            <pre className={styles.summaryBody}>{summary}</pre>
-          ) : (
-            <p className={styles.summaryEmpty}>
-              {entries.length === 0
-                ? '文字起こしがあると要約できます。'
-                : '「要約を生成」で会議の決定・アクションをまとめます。'}
-            </p>
-          )}
         </>
       )}
     </section>
