@@ -31,7 +31,7 @@ type AudioSource = 'mic' | 'system';
 const SEGMENT_MS = 25_000;
 
 const SYSTEM_AUDIO_HELP =
-  '画面共有ダイアログで「システム音声を共有」をオンにしてください。macOS で音声が取れない場合は BlackHole などの仮想オーディオを入れ、Zoom の出力をそこへルーティングしてから「マイク」モードで録音してください。';
+  '画面共有ダイアログで「システム音声を共有」をオンにしてください。Zoom・LINE・その他アプリの通話ウィンドウ / タブ / 画面を共有できます。macOS で音声が取れない場合は BlackHole などの仮想オーディオでアプリ出力をマイクへルーティングし、「マイク」モードで録音してください。';
 
 type DisplayMediaOptionsWithSystemAudio = DisplayMediaStreamOptions & {
   systemAudio?: 'include' | 'exclude';
@@ -371,7 +371,7 @@ export default function Home() {
       }
       setError(
         audioSource === 'system'
-          ? `Zoom / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`
+          ? `アプリ / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`
           : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
       );
       return;
@@ -542,14 +542,39 @@ export default function Home() {
         </button>
       ) : (
         <>
+          <div className={styles.summaryTopRow}>
+            <button
+              type="button"
+              className={styles.summaryCollapseBar}
+              onClick={() => setSummaryOpen(false)}
+              aria-expanded={true}
+              aria-label="要約を閉じる"
+            >
+              <span className={styles.summaryChipLabel}>要約</span>
+              <span className={styles.summaryChipMeta}>
+                {isSummarizing
+                  ? '生成中…'
+                  : 'タップで閉じる'}
+              </span>
+              <span
+                className={styles.summaryChipChevronUp}
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              type="button"
+              className={styles.summaryCloseButton}
+              onClick={() => setSummaryOpen(false)}
+              aria-label="要約を閉じる"
+            >
+              ×
+            </button>
+          </div>
           <div className={styles.summaryHeader}>
-            <div>
-              <h2 className={styles.feedTitle}>要約</h2>
-              <p className={styles.feedCount}>
-                Ollama · 決定 / アクション / トピック
-                {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
-              </p>
-            </div>
+            <p className={styles.feedCount}>
+              Ollama · 決定 / アクション / トピック
+              {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
+            </p>
             <div className={styles.feedActions}>
               <button
                 type="button"
@@ -574,14 +599,6 @@ export default function Home() {
                 disabled={!summary}
               >
                 要約クリア
-              </button>
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={() => setSummaryOpen(false)}
-                aria-expanded={true}
-              >
-                閉じる
               </button>
             </div>
           </div>
@@ -832,6 +849,19 @@ export default function Home() {
       <div className={styles.bgGlow} aria-hidden="true" />
 
       <header className={styles.topBar}>
+        <button
+          type="button"
+          className={styles.menuButton}
+          aria-label="メニュー"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen(true)}
+        >
+          <span className={styles.menuIcon} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true" />
           <div className={styles.brandText}>
@@ -842,21 +872,27 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>約{SEGMENT_MS / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
-          <button
-            type="button"
-            className={styles.menuButton}
-            aria-label="メニュー"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen(true)}
-          >
-            <span className={styles.menuIcon} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-          </button>
         </div>
       </header>
+
+      <div className={styles.noteEntryBar}>
+        <div className={styles.noteEntryButtons}>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={() => setScreen('note1')}
+          >
+            Note 1 · 古い順
+          </button>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={() => setScreen('note2')}
+          >
+            Note 2 · 新しい順
+          </button>
+        </div>
+      </div>
 
       {menuOpen && (
         <div className={styles.menuRoot}>
@@ -868,7 +904,7 @@ export default function Home() {
           />
           <aside className={styles.menuDrawer} role="dialog" aria-modal="true" aria-label="メニュー">
             <div className={styles.menuDrawerHeader}>
-              <h2 className={styles.menuDrawerTitle}>Menu</h2>
+              <h2 className={styles.menuDrawerTitle}>メニュー</h2>
               <button
                 type="button"
                 className={styles.ghostButton}
@@ -977,7 +1013,7 @@ export default function Home() {
                 aria-pressed={audioSource === 'system'}
                 onClick={() => setAudioSource('system')}
               >
-                Zoom / システム
+                Zoom・LINE・他
               </button>
             </div>
           </div>
@@ -1048,7 +1084,7 @@ export default function Home() {
 
         {audioSource === 'system' && !isRecording && (
           <p className={styles.audioSourceHint}>
-            Zoom / 会議タブを共有し、「システム音声を共有」をオンにします。取れないときは BlackHole 等でマイクへ迂回。
+            Zoom・LINE・その他アプリのウィンドウ / タブ / 画面を共有し、「システム音声を共有」をオンにします。取れないときは BlackHole 等でマイクへ迂回。
           </p>
         )}
 
@@ -1059,37 +1095,10 @@ export default function Home() {
         )}
       </aside>
 
-      <div className={styles.noteEntryBar}>
-        <div className={styles.noteEntryButtons}>
-          <button
-            type="button"
-            className={styles.noteEntryButton}
-            onClick={() => setScreen('note1')}
-          >
-            Note 1 · 古い順
-          </button>
-          <button
-            type="button"
-            className={styles.noteEntryButton}
-            onClick={() => setScreen('note2')}
-          >
-            Note 2 · 新しい順
-          </button>
-        </div>
-      </div>
-
       {renderSummaryPanel()}
 
       <section className={styles.feed}>
-        <div className={styles.feedHeader}>
-          <div>
-            <h2 className={styles.feedTitle}>Transcript</h2>
-            <p className={styles.feedCount}>
-              {entries.length === 0
-                ? 'まだありません'
-                : `${entries.length}件 · 新しい順`}
-            </p>
-          </div>
+        <div className={styles.feedToolbar}>
           <div className={styles.feedActions}>
             {untranslatedEn.length > 0 && (
               <button
@@ -1131,7 +1140,7 @@ export default function Home() {
             <p className={styles.emptyBody}>
               {isTranscribing
                 ? '音声を Whisper に送っています。結果がここに表示されます。'
-                : '音声ソース（マイク / Zoom・システム）を選び、Record を押してください。Note 1 / Note 2 で履歴を閲覧できます。'}
+                : '音声ソース（マイク / Zoom・LINE・他アプリ）を選び、Record を押してください。上の Note 1 / Note 2 で履歴を閲覧できます。'}
             </p>
           </div>
         ) : (
