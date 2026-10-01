@@ -12,6 +12,16 @@ import {
   saveGenre,
   saveSummary,
 } from '@/lib/history-storage';
+import {
+  clearAllAudio,
+  filenameForSegment,
+  getAudioSegment,
+  listAudioIds,
+  listAudioSegments,
+  saveAudioSegment,
+  triggerBlobDownload,
+} from '@/lib/audio-storage';
+import { buildStoreZip } from '@/lib/zip-store';
 
 type LangOption = { code: string; label: string };
 
@@ -83,6 +93,8 @@ export default function Home() {
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
+  const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
+  const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);
   const genreInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -99,6 +111,7 @@ export default function Home() {
 
   const uploadQueueRef = useRef<Blob[]>([]);
   const queueRunningRef = useRef(false);
+  const entriesLenRef = useRef(0);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -146,9 +159,16 @@ export default function Home() {
     setSummary(loadSummary());
     setGenre(loadGenre());
     setHistoryReady(true);
+    void listAudioIds()
+      .then((ids) => setAudioIds(new Set(ids)))
+      .catch((err) => console.error('audio id list failed:', err));
   }, []);
 
   // Persist on every change after hydrate (including clear → [])
+  useEffect(() => {
+    entriesLenRef.current = entries.length;
+  }, [entries]);
+
   useEffect(() => {
     if (!historyReady) return;
     try {
@@ -228,20 +248,48 @@ export default function Home() {
         }
 
         const text = data.text?.trim() ?? '';
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const at = new Date().toISOString();
+        const mimeType = blob.type || mimeTypeRef.current || 'audio/webm';
+
         if (text.length > 0) {
-          setEntries((prev) => {
-            const entry: TranscriptEntry = {
-              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              note: prev.length + 1,
-              text,
-              lang: data.lang || langRef.current,
-              at: new Date().toISOString(),
-            };
-            // Chronological store (oldest → newest)
-            return [...prev, entry];
-          });
+          const note = entriesLenRef.current + 1;
+          const entry: TranscriptEntry = {
+            id,
+            note,
+            text,
+            lang: data.lang || langRef.current,
+            at,
+          };
+          setEntries((prev) => [...prev, entry]);
+          entriesLenRef.current = note;
+          try {
+            await saveAudioSegment({
+              id: entry.id,
+              note: entry.note,
+              at: entry.at,
+              mimeType,
+              blob,
+            });
+            setAudioIds((prev) => new Set(prev).add(entry.id));
+          } catch (audioErr) {
+            console.error('audio save failed:', audioErr);
+          }
           setError('');
         } else {
+          // Keep empty / near-silent segment audio for session download.
+          try {
+            await saveAudioSegment({
+              id,
+              note: 0,
+              at,
+              mimeType,
+              blob,
+            });
+            setAudioIds((prev) => new Set(prev).add(id));
+          } catch (audioErr) {
+            console.error('orphan audio save failed:', audioErr);
+          }
           setError('変換はできたけど、内容が空でした。');
         }
       } catch (fetchErr) {
@@ -453,8 +501,58 @@ export default function Home() {
     setEntries([]);
     setSummary('');
     setCopiedId(null);
+    setAudioIds(new Set());
     clearStoredEntries();
     clearStoredSummary();
+    void clearAllAudio().catch((err) => console.error('audio clear failed:', err));
+  };
+
+  const downloadSegmentAudio = async (entryId: string) => {
+    setAudioBusyId(entryId);
+    setError('');
+    try {
+      const seg = await getAudioSegment(entryId);
+      if (!seg) {
+        setError('このセグメントの録音データがありません。');
+        return;
+      }
+      triggerBlobDownload(seg.blob, filenameForSegment(seg));
+    } catch (e) {
+      console.error('segment download failed:', e);
+      setError('録音のダウンロードに失敗しました。');
+    } finally {
+      setAudioBusyId(null);
+    }
+  };
+
+  const downloadAllAudioZip = async () => {
+    setAudioBusyId('__all__');
+    setError('');
+    try {
+      const segs = await listAudioSegments();
+      if (segs.length === 0) {
+        setError('ダウンロードできる録音がありません。');
+        return;
+      }
+      const files = await Promise.all(
+        segs.map(async (seg) => ({
+          name: filenameForSegment(seg),
+          data: new Uint8Array(await seg.blob.arrayBuffer()),
+        }))
+      );
+      const zip = buildStoreZip(files);
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .slice(0, 19);
+      triggerBlobDownload(zip, `minutes-audio-${stamp}.zip`);
+    } catch (e) {
+      console.error('zip download failed:', e);
+      setError('録音ZIPのダウンロードに失敗しました。');
+    } finally {
+      setAudioBusyId(null);
+    }
   };
 
   const clearSummaryOnly = () => {
@@ -690,6 +788,16 @@ export default function Home() {
                 {translating ? 'Ollama翻訳中…' : 'Ollamaでローカル翻訳'}
               </button>
             )}
+            {audioIds.has(entry.id) && (
+              <button
+                type="button"
+                className={styles.copyButton}
+                disabled={audioBusyId === entry.id}
+                onClick={() => downloadSegmentAudio(entry.id)}
+              >
+                {audioBusyId === entry.id ? '準備中…' : '録音をダウンロード'}
+              </button>
+            )}
             <button
               type="button"
               className={styles.copyButton}
@@ -792,6 +900,16 @@ export default function Home() {
               disabled={entries.length === 0}
             >
               {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={downloadAllAudioZip}
+              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
+            >
+              {audioBusyId === '__all__'
+                ? 'ZIP準備中…'
+                : '録音をまとめてダウンロード'}
             </button>
             <button
               type="button"
@@ -1119,6 +1237,16 @@ export default function Home() {
               disabled={entries.length === 0}
             >
               {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={downloadAllAudioZip}
+              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
+            >
+              {audioBusyId === '__all__'
+                ? 'ZIP準備中…'
+                : '録音をまとめてダウンロード'}
             </button>
             <button
               type="button"
