@@ -23,8 +23,9 @@ import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   defaultSpeakerLabel,
   letterForSpeakerId,
-  nextSpeakerId,
+  SPEAKER_LETTERS,
 } from '@/lib/speaker-letters';
+import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
   assignSpeakerByPitch,
@@ -65,8 +66,9 @@ type DiarizeStatus = {
 type Screen = 'home' | 'note1' | 'note2';
 type AudioSource = 'mic' | 'system';
 
-/** How often to cut a segment and send it to Whisper while still recording. */
-const SEGMENT_MS = 25_000;
+/** Mic: shorter chunks. Zoom/system + manual speaker flow: ~1 minute windows. */
+const SEGMENT_MS_MIC = 25_000;
+const SEGMENT_MS_SYSTEM = 60_000;
 
 const SYSTEM_AUDIO_HELP =
   '画面共有ダイアログで「システム音声を共有」をオンにしてください。Zoom・LINE・その他アプリの通話ウィンドウ / タブ / 画面を共有できます。macOS で音声が取れない場合は BlackHole などの仮想オーディオでアプリ出力をマイクへルーティングし、「マイク」モードで録音してください。';
@@ -129,6 +131,8 @@ export default function Home() {
   const [renameDraft, setRenameDraft] = useState('');
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
+  /** Active speaker while recording (Zoom A–G or mic role). */
+  const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
   const summaryRef = useRef<HTMLElement | null>(null);
   const genreInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -143,12 +147,20 @@ export default function Home() {
   const rotateAfterStopRef = useRef(false);
   const segmentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const uploadQueueRef = useRef<Blob[]>([]);
+  type UploadJob = {
+    blob: Blob;
+    /** Speaker selected when the segment was cut */
+    speakerId: number | null;
+    source: AudioSource;
+  };
+  const uploadQueueRef = useRef<UploadJob[]>([]);
   const queueRunningRef = useRef(false);
   const entriesLenRef = useRef(0);
   const lastSpeakerRef = useRef<number | null>(null);
   const speakerModeRef = useRef<SpeakerMode>('manual');
   const pitchCentroidsRef = useRef<PitchCentroid[]>([]);
+  const audioSourceRef = useRef<AudioSource>('mic');
+  const activeSpeakerRef = useRef<number>(1);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -274,6 +286,21 @@ export default function Home() {
     }
   }, [speakerMode, historyReady]);
 
+  useEffect(() => {
+    audioSourceRef.current = audioSource;
+    // Mic only uses roles 1–2; clamp if switching from Zoom A–G
+    if (audioSource === 'mic') {
+      setActiveSpeakerId((cur) => (cur > 2 ? 1 : cur));
+    }
+  }, [audioSource]);
+
+  useEffect(() => {
+    activeSpeakerRef.current = activeSpeakerId;
+  }, [activeSpeakerId]);
+
+  const segmentMs =
+    audioSource === 'system' ? SEGMENT_MS_SYSTEM : SEGMENT_MS_MIC;
+
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
@@ -291,7 +318,8 @@ export default function Home() {
     queueRunningRef.current = true;
 
     while (uploadQueueRef.current.length > 0) {
-      const blob = uploadQueueRef.current.shift()!;
+      const job = uploadQueueRef.current.shift()!;
+      const blob = job.blob;
       try {
         const formData = new FormData();
         formData.append(
@@ -343,7 +371,8 @@ export default function Home() {
         const mimeType = blob.type || mimeTypeRef.current || 'audio/webm';
         const lang = data.lang || langRef.current;
 
-        const mode = speakerModeRef.current;
+        const mode =
+          job.source === 'mic' ? 'manual' : speakerModeRef.current;
         const hasWhisperDiarize = Boolean(
           data.hasDiarizeMarks && data.turns && data.turns.length > 0
         );
@@ -383,8 +412,16 @@ export default function Home() {
             chunks = [{ text, speaker: undefined }];
           }
         } else if (text) {
-          // Manual mode: no automatic speaker assignment
-          chunks = [{ text, speaker: undefined }];
+          // Manual: stamp with speaker locked at segment cut time (Zoom active speaker / mic role)
+          if (
+            mode === 'manual' &&
+            job.speakerId != null &&
+            (job.source === 'system' || job.source === 'mic')
+          ) {
+            chunks = [{ text, speaker: job.speakerId }];
+          } else {
+            chunks = [{ text, speaker: undefined }];
+          }
         }
 
         if (text.length > 0 || chunks.some((t) => t.text.trim())) {
@@ -453,7 +490,11 @@ export default function Home() {
   const enqueueTranscribe = useCallback(
     (blob: Blob) => {
       if (blob.size === 0) return;
-      uploadQueueRef.current.push(blob);
+      uploadQueueRef.current.push({
+        blob,
+        speakerId: activeSpeakerRef.current,
+        source: audioSourceRef.current,
+      });
       setPendingCount((n) => n + 1);
       void processQueue();
     },
@@ -598,9 +639,13 @@ export default function Home() {
     setIsRecording(true);
 
     clearSegmentTimer();
+    const ms =
+      audioSourceRef.current === 'system'
+        ? SEGMENT_MS_SYSTEM
+        : SEGMENT_MS_MIC;
     segmentTimerRef.current = setInterval(() => {
       rotateSegment();
-    }, SEGMENT_MS);
+    }, ms);
   };
 
   const stopRecording = () => {
@@ -633,8 +678,11 @@ export default function Home() {
   const speakerDisplayName = (speakerId?: number) => {
     if (speakerId == null) return '—';
     const custom = speakerLabels[String(speakerId)];
-    const letter = defaultSpeakerLabel(speakerId);
-    return custom?.trim() || letter;
+    if (custom?.trim()) return custom.trim();
+    const mic = micRoleLabel(speakerId);
+    // Prefer mic role names when those ids were used as mic roles (no custom rename)
+    if (mic && audioSource === 'mic') return mic;
+    return defaultSpeakerLabel(speakerId);
   };
 
   const formatEntryForCopy = (e: TranscriptEntry) => {
@@ -655,13 +703,17 @@ export default function Home() {
     setRenameDraft('');
   };
 
-  const cycleSpeaker = (entryId: string) => {
+
+  const setEntrySpeaker = (entryId: string, speakerId: number, label?: string) => {
     setEntries((prev) =>
-      prev.map((e) => {
-        if (e.id !== entryId) return e;
-        return { ...e, speakerId: nextSpeakerId(e.speakerId) };
-      })
+      prev.map((e) => (e.id === entryId ? { ...e, speakerId } : e))
     );
+    if (label) {
+      setSpeakerLabels((prev) => {
+        if (prev[String(speakerId)]?.trim()) return prev;
+        return { ...prev, [String(speakerId)]: label };
+      });
+    }
   };
 
   const reassignAllByPitch = async () => {
@@ -991,77 +1043,16 @@ export default function Home() {
     const showTranslate = isEnglishEntry(entry) && !entry.textJa;
     const speakerId = entry.speakerId;
     const isRenaming = renamingEntryId === entry.id && speakerId != null;
+    const showZoomSpeakerUi = audioSource === 'system';
+    const showMicRoleUi = audioSource === 'mic';
     return (
       <li key={entry.id} className={styles.entry}>
         <div className={styles.entryMeta}>
           <div className={styles.entryMetaLeft}>
-            <span className={styles.entryIndex}>#{entry.note}</span>
-            {speakerId != null ? (
-              isRenaming ? (
-                <form
-                  className={styles.speakerRenameForm}
-                  onSubmit={(ev) => {
-                    ev.preventDefault();
-                    renameSpeaker(speakerId, renameDraft);
-                  }}
-                >
-                  <input
-                    className={styles.speakerRenameInput}
-                    value={renameDraft}
-                    onChange={(ev) => setRenameDraft(ev.target.value)}
-                    placeholder={letterForSpeakerId(speakerId)}
-                    aria-label="話者名（改名）"
-                    autoFocus
-                  />
-                  <button type="submit" className={styles.copyButton}>
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.copyButton}
-                    onClick={() => {
-                      setRenamingEntryId(null);
-                      setRenameDraft('');
-                    }}
-                  >
-                    取消
-                  </button>
-                </form>
-              ) : (
-                <button
-                  type="button"
-                  className={styles.speakerBadge}
-                  title="タップで改名（手動）"
-                  onClick={() => {
-                    setRenamingEntryId(entry.id);
-                    setRenameDraft(speakerLabels[String(speakerId)] || '');
-                  }}
-                >
-                  {speakerDisplayName(speakerId)}
-                </button>
-              )
-            ) : (
-              <button
-                type="button"
-                className={styles.speakerBadgeMuted}
-                onClick={() => cycleSpeaker(entry.id)}
-                title="A〜G を割り当て"
-              >
-                話者 A〜G
-              </button>
-            )}
-            {!isRenaming && (
-              <button
-                type="button"
-                className={styles.speakerCycle}
-                onClick={() => cycleSpeaker(entry.id)}
-                title="A → B → C → … → G"
-              >
-                {speakerId != null
-                  ? `次へ(${letterForSpeakerId(nextSpeakerId(speakerId))})`
-                  : 'A〜G'}
-              </button>
-            )}
+            {/* Index chrome only — no speaker controls on #N */}
+            <span className={styles.entryIndex} aria-hidden="false">
+              #{entry.note}
+            </span>
             <span className={styles.langBadge}>{entry.lang}</span>
             <time className={styles.entryTime} dateTime={entry.at}>
               {formatTime(entry.at)}
@@ -1097,6 +1088,96 @@ export default function Home() {
             </button>
           </div>
         </div>
+
+        {(showMicRoleUi || showZoomSpeakerUi) && (
+          <div className={styles.speakerRow} aria-label="話者">
+            {showMicRoleUi && (
+              <div className={styles.roleToggle} role="group" aria-label="マイク役割">
+                {MIC_ROLES.map((role) => (
+                  <button
+                    key={role.id}
+                    type="button"
+                    className={
+                      speakerId === role.id
+                        ? styles.roleButtonActive
+                        : styles.roleButton
+                    }
+                    aria-pressed={speakerId === role.id}
+                    onClick={() =>
+                      setEntrySpeaker(entry.id, role.id, role.label)
+                    }
+                  >
+                    {role.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {showZoomSpeakerUi && (
+              <>
+                {isRenaming && speakerId != null ? (
+                  <form
+                    className={styles.speakerRenameForm}
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      renameSpeaker(speakerId, renameDraft);
+                    }}
+                  >
+                    <input
+                      className={styles.speakerRenameInput}
+                      value={renameDraft}
+                      onChange={(ev) => setRenameDraft(ev.target.value)}
+                      placeholder={letterForSpeakerId(speakerId)}
+                      aria-label="話者名（改名）"
+                      autoFocus
+                    />
+                    <button type="submit" className={styles.copyButton}>
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.copyButton}
+                      onClick={() => {
+                        setRenamingEntryId(null);
+                        setRenameDraft('');
+                      }}
+                    >
+                      取消
+                    </button>
+                  </form>
+                ) : (
+                  <div className={styles.letterToggle} role="group" aria-label="話者 A〜G">
+                    {SPEAKER_LETTERS.map((letter, idx) => {
+                      const id = idx + 1;
+                      return (
+                        <button
+                          key={letter}
+                          type="button"
+                          className={
+                            speakerId === id
+                              ? styles.letterButtonActive
+                              : styles.letterButton
+                          }
+                          aria-pressed={speakerId === id}
+                          onClick={() => setEntrySpeaker(entry.id, id)}
+                          onDoubleClick={() => {
+                            setRenamingEntryId(entry.id);
+                            setRenameDraft(speakerLabels[String(id)] || '');
+                          }}
+                          title="クリックで選択 / ダブルクリックで改名"
+                        >
+                          {speakerId === id
+                            ? speakerDisplayName(id)
+                            : letter}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         <pre className={styles.transcript}>{entry.text}</pre>
         {entry.textJa && (
           <div className={styles.translationBlock}>
@@ -1278,7 +1359,7 @@ export default function Home() {
           </div>
         </div>
         <div className={styles.topMeta}>
-          <span className={styles.metaChip}>約{SEGMENT_MS / 1000}秒区切り</span>
+          <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
         </div>
       </header>
@@ -1496,59 +1577,123 @@ export default function Home() {
           </p>
         )}
 
-        <div className={styles.speakerModeBar}>
-          <span className={styles.dockLabel}>話者分け</span>
-          <div
-            className={styles.langToggle}
-            role="group"
-            aria-label="話者分けモード"
-          >
-            <button
-              type="button"
-              className={
-                speakerMode === 'manual'
-                  ? styles.langButtonActive
-                  : styles.langButton
-              }
-              aria-pressed={speakerMode === 'manual'}
-              onClick={() => setSpeakerMode('manual')}
-            >
-              手動
-            </button>
-            <button
-              type="button"
-              className={
-                speakerMode === 'auto'
-                  ? styles.langButtonActive
-                  : styles.langButton
-              }
-              aria-pressed={speakerMode === 'auto'}
-              onClick={() => setSpeakerMode('auto')}
-            >
-              自動
-            </button>
+        {audioSource === 'mic' && (
+          <div className={styles.speakerModeBar}>
+            <span className={styles.dockLabel}>役割（マイク）</span>
+            <div className={styles.roleToggle} role="group" aria-label="録音中の役割">
+              {MIC_ROLES.map((role) => (
+                <button
+                  key={role.id}
+                  type="button"
+                  className={
+                    activeSpeakerId === role.id
+                      ? styles.roleButtonActive
+                      : styles.roleButton
+                  }
+                  aria-pressed={activeSpeakerId === role.id}
+                  onClick={() => setActiveSpeakerId(role.id)}
+                >
+                  {role.label}
+                </button>
+              ))}
+            </div>
+            <p className={styles.diarizeHint} role="status">
+              マイクはシンプルな役割のみ。新しい文字起こしは選択中の役割に付きます。
+            </p>
           </div>
-          {speakerMode === 'auto' && (
-            <button
-              type="button"
-              className={styles.ghostButton}
-              disabled={autoAssignBusy || entries.length === 0}
-              onClick={() => void reassignAllByPitch()}
-            >
-              {autoAssignBusy ? '推定中…' : 'ピッチで付け直す'}
-            </button>
-          )}
-        </div>
-        <p className={styles.diarizeHint} role="status">
-          {speakerMode === 'manual'
-            ? '手動: 各行の A〜G を切替・タップで改名。自動では割り当てません。'
-            : diarizeStatus?.active
-              ? `自動: whisper ${diarizeStatus.mode} を優先。なければ声の高さ（ピッチ）で仮の A/B… を付けます。`
-              : '自動: tinydiarize 未使用のため、録音の声の高さ（ピッチ）で仮の A/B… を付けます（精度は目安）。'}
-          {speakerMode === 'auto' && diarizeStatus?.setupHint
-            ? ` ${diarizeStatus.setupHint}`
-            : ''}
-        </p>
+        )}
+
+        {audioSource === 'system' && (
+          <>
+            <div className={styles.speakerModeBar}>
+              <span className={styles.dockLabel}>話者分け（Zoom）</span>
+              <div
+                className={styles.langToggle}
+                role="group"
+                aria-label="話者分けモード"
+              >
+                <button
+                  type="button"
+                  className={
+                    speakerMode === 'manual'
+                      ? styles.langButtonActive
+                      : styles.langButton
+                  }
+                  aria-pressed={speakerMode === 'manual'}
+                  onClick={() => setSpeakerMode('manual')}
+                >
+                  手動
+                </button>
+                <button
+                  type="button"
+                  className={
+                    speakerMode === 'auto'
+                      ? styles.langButtonActive
+                      : styles.langButton
+                  }
+                  aria-pressed={speakerMode === 'auto'}
+                  onClick={() => setSpeakerMode('auto')}
+                >
+                  自動
+                </button>
+              </div>
+              {speakerMode === 'auto' && (
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  disabled={autoAssignBusy || entries.length === 0}
+                  onClick={() => void reassignAllByPitch()}
+                >
+                  {autoAssignBusy ? '推定中…' : 'ピッチで付け直す'}
+                </button>
+              )}
+            </div>
+
+            {speakerMode === 'manual' && (
+              <div className={styles.activeSpeakerBar}>
+                <span className={styles.dockLabel}>
+                  {isRecording ? 'いま話す人' : '次の話者'}
+                </span>
+                <div
+                  className={styles.letterToggle}
+                  role="group"
+                  aria-label="アクティブ話者 A〜G"
+                >
+                  {SPEAKER_LETTERS.map((letter, idx) => {
+                    const id = idx + 1;
+                    return (
+                      <button
+                        key={letter}
+                        type="button"
+                        className={
+                          activeSpeakerId === id
+                            ? styles.letterButtonActive
+                            : styles.letterButton
+                        }
+                        aria-pressed={activeSpeakerId === id}
+                        onClick={() => setActiveSpeakerId(id)}
+                      >
+                        {letterForSpeakerId(id)}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className={styles.diarizeHint} role="status">
+                  話者を選んでから話します。途中で切替可。Zoom は約60秒区切りで、その間の文字は選択中話者に付きます。
+                </p>
+              </div>
+            )}
+
+            {speakerMode === 'auto' && (
+              <p className={styles.diarizeHint} role="status">
+                {diarizeStatus?.active
+                  ? `自動: whisper ${diarizeStatus.mode} を優先。なければピッチで仮の A/B…。`
+                  : '自動: tinydiarize 未使用のためピッチで仮の A/B…（目安）。'}
+                {diarizeStatus?.setupHint ? ` ${diarizeStatus.setupHint}` : ''}
+              </p>
+            )}
+          </>
+        )}
 
         {error && (
           <p className={styles.error} role="alert">
