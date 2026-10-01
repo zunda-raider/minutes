@@ -7,11 +7,14 @@ type LangOption = { code: string; label: string };
 
 type TranscriptEntry = {
   id: string;
+  note: number; // stable chronological note number (1 = oldest)
   text: string;
   lang: string;
   at: string; // ISO
   textJa?: string;
 };
+
+type SortMode = 'oldest' | 'newest';
 
 /** How often to cut a segment and send it to Whisper while still recording. */
 const SEGMENT_MS = 25_000;
@@ -53,6 +56,7 @@ export default function Home() {
   ]);
   const [lang, setLang] = useState('ja');
   const [translateConfigured, setTranslateConfigured] = useState(false);
+  const [sortMode, setSortMode] = useState<SortMode>('newest');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -157,14 +161,17 @@ export default function Home() {
 
         const text = data.text?.trim() ?? '';
         if (text.length > 0) {
-          const entry: TranscriptEntry = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            text,
-            lang: data.lang || langRef.current,
-            at: new Date().toISOString(),
-          };
-          // Newest first
-          setEntries((prev) => [entry, ...prev]);
+          setEntries((prev) => {
+            const entry: TranscriptEntry = {
+              id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              note: prev.length + 1,
+              text,
+              lang: data.lang || langRef.current,
+              at: new Date().toISOString(),
+            };
+            // Stable chronological storage (oldest → newest)
+            return [...prev, entry];
+          });
           setError('');
         } else {
           setError('変換はできたけど、内容が空でした。');
@@ -300,13 +307,19 @@ export default function Home() {
     }
   };
 
+  const formatEntryForCopy = (e: TranscriptEntry) =>
+    e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text;
+
+  /** Always oldest → newest, independent of display sortMode. */
   const copyAll = async () => {
     if (entries.length === 0) return;
-    const all = entries
-      .map((e) => (e.textJa ? `${e.text}\n\n（日本語）\n${e.textJa}` : e.text))
-      .join('\n\n---\n\n');
+    const chronological = [...entries].sort((a, b) => a.note - b.note);
+    const all = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
     await copyText('__all__', all);
   };
+
+  const displayedEntries =
+    sortMode === 'newest' ? [...entries].slice().reverse() : entries;
 
   const clearAll = () => {
     setEntries([]);
@@ -372,7 +385,7 @@ export default function Home() {
         </div>
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
-          <span className={styles.metaChip}>Newest first</span>
+          <span className={styles.metaChip}>Copy all = 古い順</span>
         </div>
       </header>
 
@@ -455,6 +468,31 @@ export default function Home() {
             <h2 className={styles.feedTitle}>Transcript</h2>
             <p className={styles.feedCount}>{entries.length} segments</p>
           </div>
+          <div className={styles.sortRow}>
+            <span className={styles.dockLabel}>表示順</span>
+            <div className={styles.sortToggle} role="group" aria-label="Sort order">
+              <button
+                type="button"
+                className={
+                  sortMode === 'oldest' ? styles.sortButtonActive : styles.sortButton
+                }
+                aria-pressed={sortMode === 'oldest'}
+                onClick={() => setSortMode('oldest')}
+              >
+                Note 1 · 古い順
+              </button>
+              <button
+                type="button"
+                className={
+                  sortMode === 'newest' ? styles.sortButtonActive : styles.sortButton
+                }
+                aria-pressed={sortMode === 'newest'}
+                onClick={() => setSortMode('newest')}
+              >
+                Note 2 · 新しい順
+              </button>
+            </div>
+          </div>
           <div className={styles.feedActions}>
             {untranslatedEn.length > 0 && (
               <button
@@ -501,14 +539,14 @@ export default function Home() {
           </div>
         ) : (
           <ul className={styles.entryList}>
-            {entries.map((entry, index) => {
+            {displayedEntries.map((entry) => {
               const translating = translatingIds.has(entry.id);
               const showTranslate = isEnglishEntry(entry) && !entry.textJa;
               return (
                 <li key={entry.id} className={styles.entry}>
                   <div className={styles.entryMeta}>
                     <div className={styles.entryMetaLeft}>
-                      <span className={styles.entryIndex}>#{index + 1}</span>
+                      <span className={styles.entryIndex}>#{entry.note}</span>
                       <span className={styles.langBadge}>{entry.lang}</span>
                       <time className={styles.entryTime} dateTime={entry.at}>
                         {formatTime(entry.at)}
@@ -529,12 +567,7 @@ export default function Home() {
                         type="button"
                         className={styles.copyButton}
                         onClick={() =>
-                          copyText(
-                            entry.id,
-                            entry.textJa
-                              ? `${entry.text}\n\n（日本語）\n${entry.textJa}`
-                              : entry.text
-                          )
+                          copyText(entry.id, formatEntryForCopy(entry))
                         }
                       >
                         {copiedId === entry.id ? 'Copied' : 'Copy'}

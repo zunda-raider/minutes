@@ -356,6 +356,10 @@
   flex-wrap: wrap;
 }
 
+.feedHeader > div:first-child {
+  min-width: 8rem;
+}
+
 .feedTitle {
   margin: 0;
   font-size: 1.05rem;
@@ -367,6 +371,49 @@
   margin: 0.15rem 0 0;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.sortRow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+
+.sortToggle {
+  display: inline-flex;
+  width: fit-content;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+.sortButton,
+.sortButtonActive {
+  appearance: none;
+  border: none;
+  min-height: 40px;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  background: transparent;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+
+.sortButtonActive {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 6px 18px rgba(91, 140, 255, 0.35);
+}
+
+.sortButton:hover:not(:disabled):not(.sortButtonActive) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .feedActions {
@@ -579,6 +626,16 @@
   .langToggle {
     display: grid;
     grid-template-columns: 1fr 1fr;
+  }
+
+  .sortToggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .sortRow {
+    width: 100%;
   }
 
   .recordButton,
