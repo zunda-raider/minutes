@@ -460,6 +460,10 @@
   line-height: 1.55;
 }
 
+.emptyState .recordButton {
+  margin-top: 1.25rem;
+}
+
 .entryList {
   list-style: none;
   padding: 0;
@@ -592,6 +596,227 @@
 
   .ghostButton,
   .ghostButtonDanger {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}
+
+
+/* —— Note navigation / home gate —— */
+.noteTopBar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.backButton {
+  appearance: none;
+  border: 1px solid var(--border);
+  min-height: 40px;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.backButton:hover {
+  background: rgba(91, 140, 255, 0.15);
+  border-color: rgba(91, 140, 255, 0.4);
+}
+
+.backChevron {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  display: inline-block;
+}
+
+.noteHeading {
+  flex: 1 1 12rem;
+}
+
+.liveStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.homePreview {
+  margin-bottom: 1.5rem;
+}
+
+.previewHeader {
+  margin-bottom: 0.65rem;
+}
+
+.previewCard {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.emptyStateCompact {
+  padding: 1.25rem 1rem;
+  border-radius: var(--radius);
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 255, 255, 0.02);
+  text-align: center;
+}
+
+.noteGate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.gateHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.noteCards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.noteCard {
+  appearance: none;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.15rem 1.2rem;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  color: var(--text);
+  background:
+    linear-gradient(160deg, rgba(91, 140, 255, 0.12), transparent 55%),
+    rgba(255, 255, 255, 0.03);
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.noteCard:hover {
+  transform: translateY(-2px);
+  border-color: rgba(91, 140, 255, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+
+.noteCard:nth-child(2) {
+  background:
+    linear-gradient(160deg, rgba(124, 92, 255, 0.14), transparent 55%),
+    rgba(255, 255, 255, 0.03);
+}
+
+.noteCardKicker {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c7d2fe;
+}
+
+.noteCardTitle {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.noteCardDesc {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.noteCardCta {
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+@media (max-width: 760px) {
+  .noteCards {
+    grid-template-columns: 1fr;
+  }
+
+  .noteTopBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+
+/* Compact Note entry on Home (PR #6 home + links) */
+.noteEntryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.noteEntryButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.noteEntryButton {
+  appearance: none;
+  border: 1px solid var(--border);
+  min-height: 40px;
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  background: rgba(91, 140, 255, 0.12);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.noteEntryButton:hover {
+  background: rgba(91, 140, 255, 0.22);
+  border-color: rgba(91, 140, 255, 0.45);
+}
+
+.noteEntryHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  flex: 1 1 12rem;
+}
+
+@media (max-width: 760px) {
+  .noteEntryButtons {
+    width: 100%;
+  }
+
+  .noteEntryButton {
     flex: 1 1 auto;
     text-align: center;
   }
