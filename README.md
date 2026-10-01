@@ -31,6 +31,8 @@ cp .env.example .env.local
 | `TEMP_DIR` | No | 一時音声ディレクトリ |
 | `WHISPER_LANG` | No | デフォルト言語（省略時 `ja`） |
 | `WHISPER_LANGS` | No | 許可言語リスト（省略時 `ja,en`） |
+| `OPENAI_API_KEY` / `TRANSLATE_API_KEY` | No* | 英語→日本語翻訳（未設定時は「翻訳用APIキー未設定」） |
+| `OPENAI_MODEL` | No | 翻訳モデル（省略時 `gpt-4o-mini`） |
 
 ### Windows の例
 
@@ -50,6 +52,7 @@ WHISPER_MODEL=/Users/taiki714/Desktop/whisper/whisper.cpp/models/ggml-large-v3-t
 FFMPEG_BIN=ffmpeg
 WHISPER_LANG=ja
 WHISPER_LANGS=ja,en
+OPENAI_API_KEY=sk-...
 ```
 
 ### Linux の例
@@ -75,7 +78,7 @@ npm run dev
 
 - マイク許可が必要です。
 - 録音中はタブを閉じないでください（バックグラウンド常駐は未対応）。
-- 録音中も約 25 秒ごとにセグメントを Whisper へ送ります（録音と文字起こしは並行）。結果は履歴に追加され、各項目をコピーできます。
+- 録音中も約 25 秒ごとにセグメントを Whisper へ送ります（録音と文字起こしは並行）。結果は**新しい順**に履歴表示。言語は **日本語 / English ボタン**で切替。英語結果は OpenAI キーがあれば「日本語に翻訳」できます。
 - Zoom の相手音声を取るにはシステム音声 / ループバックが必要です（未実装）。
 
 ## 技術スタック
