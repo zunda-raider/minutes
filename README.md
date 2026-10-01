@@ -2,7 +2,7 @@
 
 マイク音声を録音し、ローカルの [whisper.cpp](https://github.com/ggerganov/whisper.cpp) で文字起こしする Next.js アプリです。
 
-> **Note:** マイク録音に加え、**Zoom / システム音声**（`getDisplayMedia` + システム音声）に対応。  
+> **Note:** マイク録音に加え、**Zoom・LINE・その他アプリ / システム音声**（`getDisplayMedia` + システム音声）に対応。  
 > 話者分離・バックグラウンド常駐は今後の予定 (P2/P3) です。
 
 ## 必要なもの
@@ -133,8 +133,8 @@ Home の「ジャンル / 文脈」欄に会議の種類を自由入力できま
 - マイク許可が必要です。
 - 録音中はタブを閉じないでください（バックグラウンド常駐は未対応）。
 - 録音中も約 25 秒ごとにセグメントを Whisper へ送ります（録音と文字起こしは並行）。結果は**新しい順**に履歴表示。言語は **日本語 / English ボタン**で切替。英語結果は **Ollama ローカル翻訳**（任意で OpenAI フォールバック）できます。
-- **Zoom / システム音声:** Home の「Zoom / システム」を選び Record → 画面（または Zoom ウィンドウ / タブ）を共有し、ダイアログで **システム音声を共有** をオンにします。Chrome など対応ブラウザでは `systemAudio: "include"` / `windowAudio: "system"` を要求します。
-- macOS で音声トラックが取れない場合は [BlackHole](https://existential.audio/blackhole/) などの仮想オーディオで Zoom 出力をマイクへルーティングし、「マイク」モードで録音してください。
+- **Zoom・LINE・その他アプリ / システム音声:** Home の「Zoom・LINE・他」を選び Record → **Zoom / LINE / その他通話アプリ**のウィンドウ・タブ・画面を共有し、ダイアログで **システム音声を共有** をオンにします（同じ `getDisplayMedia` パイプライン）。Chrome などでは `systemAudio: "include"` / `windowAudio: "system"` を要求します。
+- macOS で音声トラックが取れない場合は [BlackHole](https://existential.audio/blackhole/) などの仮想オーディオでアプリ出力をマイクへルーティングし、「マイク」モードで録音してください。
 
 ## 技術スタック
 
@@ -146,7 +146,7 @@ Home の「ジャンル / 文脈」欄に会議の種類を自由入力できま
 
 - **P0:** 録音バグ修正・パスの環境変数化・CSS / Node25 localStorage 修正
 - **言語切替:** UI で ja/en を選択し `whisper-cli -l` に渡す（本機能）
-- **P1:** 音声ソース切替（Zoom/システム音声）✅ · チャンクアップロード · visibility 警告
+- **P1:** 音声ソース切替（Zoom・LINE・他 / システム音声）✅ · チャンクアップロード · visibility 警告
 - **P2:** 話者分離 (diarization)
 - **P3:** Electron/Tauri などデスクトップ常駐
 
