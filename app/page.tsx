@@ -359,96 +359,146 @@ export default function Home() {
   };
 
   return (
-    <main className={styles.main}>
-      <h1 className={styles.title}>🎤 議事録アプリ</h1>
-      <p className={styles.hint}>
-        録音中も約{SEGMENT_MS / 1000}
-        秒ごとに Whisper へ送信します。結果は新しい順に表示されます。英語の結果は日本語へ翻訳できます。
-      </p>
+    <div className={styles.app}>
+      <div className={styles.bgGlow} aria-hidden="true" />
 
-      <div className={styles.langRow}>
-        <span className={styles.langLabel}>言語 / Language</span>
-        <div className={styles.langToggle} role="group" aria-label="Language">
-          {langs.map((opt) => (
-            <button
-              key={opt.code}
-              type="button"
-              className={
-                lang === opt.code ? styles.langButtonActive : styles.langButton
-              }
-              disabled={isRecording}
-              aria-pressed={lang === opt.code}
-              onClick={() => setLang(opt.code)}
-            >
-              {opt.label}
-            </button>
-          ))}
+      <header className={styles.topBar}>
+        <div className={styles.brand}>
+          <span className={styles.brandMark} aria-hidden="true" />
+          <div className={styles.brandText}>
+            <h1 className={styles.title}>Minutes</h1>
+            <p className={styles.subtitle}>Local Whisper meeting notes</p>
+          </div>
         </div>
-      </div>
+        <div className={styles.topMeta}>
+          <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
+          <span className={styles.metaChip}>Newest first</span>
+        </div>
+      </header>
 
-      <div className={styles.controls}>
-        <button
-          type="button"
-          onClick={isRecording ? stopRecording : startRecording}
-          className={isRecording ? styles.stopButton : styles.startButton}
-        >
-          {isRecording ? '🛑 停止' : '▶️ 録音開始'}
-        </button>
-      </div>
+      <aside className={styles.controlDock}>
+        <div className={styles.dockInner}>
+          <div className={styles.dockGroup}>
+            <span className={styles.dockLabel}>Language</span>
+            <div className={styles.langToggle} role="group" aria-label="Language">
+              {langs.map((opt) => (
+                <button
+                  key={opt.code}
+                  type="button"
+                  className={
+                    lang === opt.code ? styles.langButtonActive : styles.langButton
+                  }
+                  disabled={isRecording}
+                  aria-pressed={lang === opt.code}
+                  onClick={() => setLang(opt.code)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <div className={styles.statusRow} aria-live="polite">
-        {isRecording && <span className={styles.badgeRecording}>● 録音中</span>}
-        {isTranscribing && (
-          <span className={styles.badgeTranscribing}>
-            ⏳ 文字起こし中（残り {pendingCount}）
-          </span>
+          <div className={styles.dockGroupCenter}>
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              className={
+                isRecording ? styles.recordButtonActive : styles.recordButton
+              }
+              aria-pressed={isRecording}
+            >
+              <span
+                className={
+                  isRecording ? styles.recordIconStop : styles.recordIconPlay
+                }
+                aria-hidden="true"
+              />
+              <span>{isRecording ? 'Stop' : 'Record'}</span>
+            </button>
+          </div>
+
+          <div className={styles.dockGroup} aria-live="polite">
+            <span className={styles.dockLabel}>Status</span>
+            <div className={styles.statusPills}>
+              {isRecording && (
+                <span className={styles.pillLive}>
+                  <span className={styles.dotPulse} aria-hidden="true" />
+                  Recording
+                </span>
+              )}
+              {isTranscribing && (
+                <span className={styles.pillQueue}>
+                  <span className={styles.dotAmber} aria-hidden="true" />
+                  Transcribing · {pendingCount}
+                </span>
+              )}
+              {!isRecording && !isTranscribing && (
+                <span className={styles.pillIdle}>
+                  <span className={styles.dotIdle} aria-hidden="true" />
+                  Idle
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
         )}
-        {!isRecording && !isTranscribing && (
-          <span className={styles.badgeIdle}>待機中</span>
-        )}
-      </div>
+      </aside>
 
-      {error && <p className={styles.error} role="alert">{error}</p>}
-
-      <section className={styles.result}>
-        <div className={styles.resultHeader}>
-          <h2 className={styles.resultTitle}>📝 結果（{entries.length}）· 新しい順</h2>
-          <div className={styles.resultActions}>
+      <section className={styles.feed}>
+        <div className={styles.feedHeader}>
+          <div>
+            <h2 className={styles.feedTitle}>Transcript</h2>
+            <p className={styles.feedCount}>{entries.length} segments</p>
+          </div>
+          <div className={styles.feedActions}>
             {untranslatedEn.length > 0 && (
               <button
                 type="button"
-                className={styles.secondaryButton}
+                className={styles.ghostButton}
                 onClick={translateAllEnglish}
                 disabled={translatingIds.size > 0}
               >
                 {translateConfigured
-                  ? `英語を全て日本語へ（${untranslatedEn.length}）`
-                  : '英語を全て日本語へ'}
+                  ? `Translate all EN (${untranslatedEn.length})`
+                  : 'Translate all EN'}
               </button>
             )}
             <button
               type="button"
-              className={styles.secondaryButton}
+              className={styles.ghostButton}
               onClick={copyAll}
               disabled={entries.length === 0}
             >
-              {copiedId === '__all__' ? '✓ コピーした' : '全てコピー'}
+              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
             </button>
             <button
               type="button"
-              className={styles.secondaryButton}
+              className={styles.ghostButtonDanger}
               onClick={clearAll}
               disabled={entries.length === 0}
             >
-              履歴をクリア
+              Clear
             </button>
           </div>
         </div>
 
         {entries.length === 0 ? (
-          <p className={styles.empty}>
-            {isTranscribing ? '最初の結果を待っています…' : 'まだ結果はないよ〜'}
-          </p>
+          <div className={styles.emptyState}>
+            <div className={styles.emptyOrb} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>
+              {isTranscribing ? 'Waiting for the first segment' : 'Ready when you are'}
+            </h3>
+            <p className={styles.emptyBody}>
+              {isTranscribing
+                ? 'Audio is queued for Whisper. New text will appear here.'
+                : 'Hit Record to capture mic audio. Segments land here newest-first; English lines can be translated to Japanese.'}
+            </p>
+          </div>
         ) : (
           <ul className={styles.entryList}>
             {entries.map((entry, index) => {
@@ -457,9 +507,13 @@ export default function Home() {
               return (
                 <li key={entry.id} className={styles.entry}>
                   <div className={styles.entryMeta}>
-                    <span>
-                      #{index + 1} · {entry.lang} · {formatTime(entry.at)}
-                    </span>
+                    <div className={styles.entryMetaLeft}>
+                      <span className={styles.entryIndex}>#{index + 1}</span>
+                      <span className={styles.langBadge}>{entry.lang}</span>
+                      <time className={styles.entryTime} dateTime={entry.at}>
+                        {formatTime(entry.at)}
+                      </time>
+                    </div>
                     <div className={styles.entryActions}>
                       {showTranslate && (
                         <button
@@ -468,7 +522,7 @@ export default function Home() {
                           disabled={translating}
                           onClick={() => translateEntry(entry)}
                         >
-                          {translating ? '翻訳中…' : '日本語に翻訳'}
+                          {translating ? 'Translating…' : 'To Japanese'}
                         </button>
                       )}
                       <button
@@ -483,14 +537,14 @@ export default function Home() {
                           )
                         }
                       >
-                        {copiedId === entry.id ? '✓ コピーした' : 'コピー'}
+                        {copiedId === entry.id ? 'Copied' : 'Copy'}
                       </button>
                     </div>
                   </div>
                   <pre className={styles.transcript}>{entry.text}</pre>
                   {entry.textJa && (
                     <div className={styles.translationBlock}>
-                      <div className={styles.translationLabel}>日本語訳</div>
+                      <div className={styles.translationLabel}>Japanese</div>
                       <pre className={styles.transcriptJa}>{entry.textJa}</pre>
                     </div>
                   )}
@@ -500,6 +554,6 @@ export default function Home() {
           </ul>
         )}
       </section>
-    </main>
+    </div>
   );
 }

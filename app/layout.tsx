@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "議事録アプリ | minutes",
-  description: "マイク録音をローカル Whisper で文字起こしする議事録アプリ",
+  title: "Minutes | Local Whisper notes",
+  description: "Dark, local-first meeting transcription with Whisper",
 };
 
 export default function RootLayout({
