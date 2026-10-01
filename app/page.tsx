@@ -393,7 +393,7 @@ export default function Home() {
                 disabled={translating}
                 onClick={() => translateEntry(entry)}
               >
-                {translating ? 'Translating…' : 'To Japanese'}
+                {translating ? 'Ollama翻訳中…' : 'Ollamaでローカル翻訳'}
               </button>
             )}
             <button
@@ -408,7 +408,7 @@ export default function Home() {
         <pre className={styles.transcript}>{entry.text}</pre>
         {entry.textJa && (
           <div className={styles.translationBlock}>
-            <div className={styles.translationLabel}>Japanese</div>
+            <div className={styles.translationLabel}>日本語訳（ローカル）</div>
             <pre className={styles.transcriptJa}>{entry.textJa}</pre>
           </div>
         )}
@@ -485,8 +485,8 @@ export default function Home() {
                 disabled={translatingIds.size > 0}
               >
                 {translateConfigured
-                  ? `Translate all EN (${untranslatedEn.length})`
-                  : 'Translate all EN'}
+                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
+                  : 'Ollamaで全て翻訳'}
               </button>
             )}
             <button
@@ -679,8 +679,8 @@ export default function Home() {
                 disabled={translatingIds.size > 0}
               >
                 {translateConfigured
-                  ? `Translate all EN (${untranslatedEn.length})`
-                  : 'Translate all EN'}
+                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
+                  : 'Ollamaで全て翻訳'}
               </button>
             )}
             <button
