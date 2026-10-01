@@ -7,8 +7,26 @@ import {
 
 export const runtime = 'nodejs';
 
-const SYSTEM_PROMPT =
+const BASE_SYSTEM_PROMPT =
   'You are a professional translator. Translate the user text from English to natural Japanese. Output ONLY the Japanese translation, with no quotes or commentary.';
+
+function buildTranslateSystemPrompt(genre?: string): string {
+  const g = genre?.trim();
+  if (!g) return BASE_SYSTEM_PROMPT;
+  return (
+    BASE_SYSTEM_PROMPT +
+    ` The meeting genre/context is: "${g}". Prefer terminology and tone appropriate for that domain.`
+  );
+}
+
+function buildTranslateUserContent(text: string, genre?: string): string {
+  const g = genre?.trim();
+  if (!g) return text;
+  return `Meeting context/genre: ${g}
+
+Text to translate:
+${text}`;
+}
 
 function getOpenAiKey(): string | null {
   return (
@@ -26,7 +44,7 @@ function getProvider(): Provider {
   return 'auto';
 }
 
-async function translateWithOllama(text: string): Promise<string> {
+async function translateWithOllama(text: string, genre?: string): Promise<string> {
   const baseUrl = getOllamaBaseUrl();
   const model = getOllamaModel();
 
@@ -42,8 +60,8 @@ async function translateWithOllama(text: string): Promise<string> {
         model,
         stream: false,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: text },
+          { role: 'system', content: buildTranslateSystemPrompt(genre) },
+          { role: 'user', content: buildTranslateUserContent(text, genre) },
         ],
       }),
     });
@@ -73,7 +91,7 @@ async function translateWithOllama(text: string): Promise<string> {
   return textJa;
 }
 
-async function translateWithOpenAI(text: string): Promise<string> {
+async function translateWithOpenAI(text: string, genre?: string): Promise<string> {
   const apiKey = getOpenAiKey();
   if (!apiKey) {
     throw new Error('翻訳用APIキー未設定');
@@ -94,8 +112,8 @@ async function translateWithOpenAI(text: string): Promise<string> {
       model,
       temperature: 0.2,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: text },
+        { role: 'system', content: buildTranslateSystemPrompt(genre) },
+        { role: 'user', content: buildTranslateUserContent(text, genre) },
       ],
     }),
   });
@@ -133,6 +151,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'text が空です。' }, { status: 400 });
   }
 
+  const genre =
+    body && typeof body === 'object'
+      ? String(
+          (body as { genre?: unknown; context?: unknown }).genre ??
+            (body as { context?: unknown }).context ??
+            ''
+        ).trim()
+      : '';
+
   const provider = getProvider();
   const errors: string[] = [];
 
@@ -141,7 +168,7 @@ export async function POST(req: Request) {
 
   if (tryOllama) {
     try {
-      const textJa = await translateWithOllama(text);
+      const textJa = await translateWithOllama(text, genre || undefined);
       return NextResponse.json({ textJa, provider: 'ollama' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Ollama翻訳に失敗しました。';
@@ -155,7 +182,7 @@ export async function POST(req: Request) {
 
   if (tryOpenAI) {
     try {
-      const textJa = await translateWithOpenAI(text);
+      const textJa = await translateWithOpenAI(text, genre || undefined);
       return NextResponse.json({
         textJa,
         provider: 'openai',

@@ -115,6 +115,11 @@ npm run dev
 
 
 
+
+## ジャンル / 文脈
+
+Home の「ジャンル / 文脈」欄に会議の種類を自由入力できます（localStorage に保存）。空欄なら従来どおり。入力があると `/api/translate` と `/api/summarize` のプロンプトに渡し、用語・要約の精度を上げます。
+
 ## 要約
 
 「要約」ボタンで文字起こし全体（古い順、日本語訳があれば併記）を Ollama（`OLLAMA_MODEL`）に送り、議題・決定・アクションの日本語箇条書きを生成します。結果は localStorage（`minutes.transcript.summary.v1`）に保存され、「要約クリア」または履歴クリアで消えます。
