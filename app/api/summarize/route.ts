@@ -7,7 +7,7 @@ import {
 
 export const runtime = 'nodejs';
 
-const SYSTEM_PROMPT = `あなたは会議議事録の要約アシスタントです。
+const BASE_SYSTEM_PROMPT = `あなたは会議議事録の要約アシスタントです。
 与えられた文字起こし（時系列・古い順）を読み、必ず日本語で要約してください。
 次の見出しを使った箇条書きで出力してください（該当がなければ「なし」）:
 
@@ -25,6 +25,31 @@ const SYSTEM_PROMPT = `あなたは会議議事録の要約アシスタントで
 
 余計な前置きや英語の説明は出さないでください。`;
 
+function buildSummarizeSystemPrompt(genre?: string): string {
+  const g = genre?.trim();
+  if (!g) return BASE_SYSTEM_PROMPT;
+  return (
+    BASE_SYSTEM_PROMPT +
+    `
+
+会議のジャンル/文脈: 「${g}」。この分野の用語・関心事を優先して要約してください。`
+  );
+}
+
+function buildSummarizeUserContent(transcript: string, genre?: string): string {
+  const g = genre?.trim();
+  if (!g) {
+    return `以下の会議文字起こしを要約してください。
+
+${transcript}`;
+  }
+  return `会議ジャンル/文脈: ${g}
+
+以下の会議文字起こしを要約してください。
+
+${transcript}`;
+}
+
 function getOpenAiKey(): string | null {
   return (
     process.env.OPENAI_API_KEY?.trim() ||
@@ -41,7 +66,7 @@ function getProvider(): Provider {
   return 'auto';
 }
 
-async function summarizeWithOllama(transcript: string): Promise<string> {
+async function summarizeWithOllama(transcript: string, genre?: string): Promise<string> {
   const baseUrl = getOllamaBaseUrl();
   const model = getOllamaModel();
   await ensureOllamaRunning(baseUrl);
@@ -55,10 +80,10 @@ async function summarizeWithOllama(transcript: string): Promise<string> {
         model,
         stream: false,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: buildSummarizeSystemPrompt(genre) },
           {
             role: 'user',
-            content: `以下の会議文字起こしを要約してください。\n\n${transcript}`,
+            content: buildSummarizeUserContent(transcript, genre),
           },
         ],
       }),
@@ -87,7 +112,7 @@ async function summarizeWithOllama(transcript: string): Promise<string> {
   return summary;
 }
 
-async function summarizeWithOpenAI(transcript: string): Promise<string> {
+async function summarizeWithOpenAI(transcript: string, genre?: string): Promise<string> {
   const apiKey = getOpenAiKey();
   if (!apiKey) throw new Error('翻訳用APIキー未設定');
 
@@ -106,10 +131,10 @@ async function summarizeWithOpenAI(transcript: string): Promise<string> {
       model,
       temperature: 0.3,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSummarizeSystemPrompt(genre) },
         {
           role: 'user',
-          content: `以下の会議文字起こしを要約してください。\n\n${transcript}`,
+          content: buildSummarizeUserContent(transcript, genre),
         },
       ],
     }),
@@ -151,6 +176,15 @@ export async function POST(req: Request) {
     );
   }
 
+  const genre =
+    body && typeof body === 'object'
+      ? String(
+          (body as { genre?: unknown; context?: unknown }).genre ??
+            (body as { context?: unknown }).context ??
+            ''
+        ).trim()
+      : '';
+
   const provider = getProvider();
   const errors: string[] = [];
   const tryOllama = provider === 'ollama' || provider === 'auto';
@@ -158,7 +192,7 @@ export async function POST(req: Request) {
 
   if (tryOllama) {
     try {
-      const summary = await summarizeWithOllama(transcript);
+      const summary = await summarizeWithOllama(transcript, genre || undefined);
       return NextResponse.json({ summary, provider: 'ollama' });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Ollama要約に失敗しました。';
@@ -172,7 +206,7 @@ export async function POST(req: Request) {
 
   if (tryOpenAI) {
     try {
-      const summary = await summarizeWithOpenAI(transcript);
+      const summary = await summarizeWithOpenAI(transcript, genre || undefined);
       return NextResponse.json({
         summary,
         provider: 'openai',

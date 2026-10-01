@@ -6,8 +6,10 @@ import {
   clearStoredEntries,
   clearStoredSummary,
   loadEntries,
+  loadGenre,
   loadSummary,
   saveEntries,
+  saveGenre,
   saveSummary,
 } from '@/lib/history-storage';
 
@@ -68,6 +70,7 @@ export default function Home() {
   const [historyReady, setHistoryReady] = useState(false);
   const [summary, setSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [genre, setGenre] = useState('');
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -127,6 +130,7 @@ export default function Home() {
   useEffect(() => {
     setEntries(loadEntries());
     setSummary(loadSummary());
+    setGenre(loadGenre());
     setHistoryReady(true);
   }, []);
 
@@ -152,6 +156,15 @@ export default function Home() {
       );
     }
   }, [summary, historyReady]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+    try {
+      saveGenre(genre);
+    } catch {
+      setError('ジャンルの保存に失敗しました。');
+    }
+  }, [genre, historyReady]);
 
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -396,7 +409,11 @@ export default function Home() {
       const res = await fetch('/api/summarize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript: buildTranscriptForSummary() }),
+        body: JSON.stringify({
+          transcript: buildTranscriptForSummary(),
+          genre: genre.trim() || undefined,
+          context: genre.trim() || undefined,
+        }),
       });
       const data = (await res.json()) as { summary?: string; error?: string };
       if (!res.ok) {
@@ -424,6 +441,7 @@ export default function Home() {
           <h2 className={styles.feedTitle}>要約</h2>
           <p className={styles.feedCount}>
             Ollama · 決定 / アクション / トピック
+            {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
           </p>
         </div>
         <div className={styles.feedActions}>
@@ -473,7 +491,11 @@ export default function Home() {
       const res = await fetch('/api/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: entry.text }),
+        body: JSON.stringify({
+          text: entry.text,
+          genre: genre.trim() || undefined,
+          context: genre.trim() || undefined,
+        }),
       });
       const data = (await res.json()) as { textJa?: string; error?: string };
       if (!res.ok) {
@@ -779,6 +801,24 @@ export default function Home() {
           </p>
         )}
       </aside>
+
+      <section className={styles.genreField}>
+        <label htmlFor="meeting-genre" className={styles.dockLabel}>
+          ジャンル / 文脈
+        </label>
+        <input
+          id="meeting-genre"
+          className={styles.genreInput}
+          type="text"
+          value={genre}
+          onChange={(e) => setGenre(e.target.value)}
+          placeholder="例: 週次エンジニア定例 / 採用面接 / 営業キックオフ"
+          autoComplete="off"
+        />
+        <p className={styles.genreHint}>
+          任意。翻訳・要約の精度向上に使います（空なら従来どおり）。
+        </p>
+      </section>
 
       <nav className={styles.noteEntryBar} aria-label="Notes">
         <span className={styles.dockLabel}>Notes</span>

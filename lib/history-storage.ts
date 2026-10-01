@@ -14,6 +14,7 @@ export type StoredTranscriptEntry = {
 
 export const HISTORY_STORAGE_KEY = 'minutes.transcript.entries.v1';
 export const SUMMARY_STORAGE_KEY = 'minutes.transcript.summary.v1';
+export const GENRE_STORAGE_KEY = 'minutes.meeting.genre.v1';
 
 function canUseStorage(): boolean {
   return (
@@ -101,5 +102,30 @@ export function clearStoredSummary(): void {
     localStorage.removeItem(SUMMARY_STORAGE_KEY);
   } catch (err) {
     console.error('summary clear failed:', err);
+  }
+}
+
+export function loadGenre(): string {
+  if (!canUseStorage()) return '';
+  try {
+    return localStorage.getItem(GENRE_STORAGE_KEY) ?? '';
+  } catch (err) {
+    console.error('genre load failed:', err);
+    return '';
+  }
+}
+
+export function saveGenre(genre: string): void {
+  if (!canUseStorage()) return;
+  try {
+    const trimmed = genre.trim();
+    if (!trimmed) {
+      localStorage.removeItem(GENRE_STORAGE_KEY);
+    } else {
+      localStorage.setItem(GENRE_STORAGE_KEY, trimmed);
+    }
+  } catch (err) {
+    console.error('genre save failed:', err);
+    throw err;
   }
 }

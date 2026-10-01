@@ -861,6 +861,45 @@
   font-size: 0.88rem;
 }
 
+
+.genreField {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0 1.25rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.genreInput {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.genreInput::placeholder {
+  color: #64748b;
+}
+
+.genreInput:focus {
+  outline: 2px solid #5b8cff;
+  outline-offset: 1px;
+}
+
+.genreHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .recordButtonActive,
   .dotPulse {
