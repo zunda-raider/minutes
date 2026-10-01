@@ -18,6 +18,7 @@ export const HISTORY_STORAGE_KEY = 'minutes.transcript.entries.v1';
 export const SUMMARY_STORAGE_KEY = 'minutes.transcript.summary.v1';
 export const GENRE_STORAGE_KEY = 'minutes.meeting.genre.v1';
 export const SPEAKER_LABELS_KEY = 'minutes.speakers.labels.v1';
+export const SPEAKER_MODE_KEY = 'minutes.speakers.mode.v1';
 
 function canUseStorage(): boolean {
   return (
@@ -179,5 +180,28 @@ export function clearStoredSpeakerLabels(): void {
     localStorage.removeItem(SPEAKER_LABELS_KEY);
   } catch (err) {
     console.error('speaker labels clear failed:', err);
+  }
+}
+
+export type SpeakerMode = 'manual' | 'auto';
+
+export function loadSpeakerMode(): SpeakerMode {
+  if (!canUseStorage()) return 'manual';
+  try {
+    const raw = localStorage.getItem(SPEAKER_MODE_KEY);
+    return raw === 'auto' ? 'auto' : 'manual';
+  } catch (err) {
+    console.error('speaker mode load failed:', err);
+    return 'manual';
+  }
+}
+
+export function saveSpeakerMode(mode: SpeakerMode): void {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.setItem(SPEAKER_MODE_KEY, mode);
+  } catch (err) {
+    console.error('speaker mode save failed:', err);
+    throw err;
   }
 }

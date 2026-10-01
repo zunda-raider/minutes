@@ -13,10 +13,24 @@ import {
   saveEntries,
   saveGenre,
   saveSpeakerLabels,
+  saveSpeakerMode,
   saveSummary,
+  loadSpeakerMode,
   type SpeakerLabels,
+  type SpeakerMode,
 } from '@/lib/history-storage';
 import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
+import {
+  defaultSpeakerLabel,
+  letterForSpeakerId,
+  nextSpeakerId,
+} from '@/lib/speaker-letters';
+import {
+  analyzeBlobPitch,
+  assignSpeakerByPitch,
+  provisionalTurnsFromPitch,
+  type PitchCentroid,
+} from '@/lib/pitch-diarize';
 import {
   clearAllAudio,
   filenameForSegment,
@@ -108,7 +122,9 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
+  const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
   const [diarizeStatus, setDiarizeStatus] = useState<DiarizeStatus | null>(null);
+  const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [renamingEntryId, setRenamingEntryId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
@@ -131,6 +147,8 @@ export default function Home() {
   const queueRunningRef = useRef(false);
   const entriesLenRef = useRef(0);
   const lastSpeakerRef = useRef<number | null>(null);
+  const speakerModeRef = useRef<SpeakerMode>('manual');
+  const pitchCentroidsRef = useRef<PitchCentroid[]>([]);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -192,6 +210,9 @@ export default function Home() {
     setSummary(loadSummary());
     setGenre(loadGenre());
     setSpeakerLabels(loadSpeakerLabels());
+    const mode = loadSpeakerMode();
+    setSpeakerMode(mode);
+    speakerModeRef.current = mode;
     setHistoryReady(true);
     void listAudioIds()
       .then((ids) => setAudioIds(new Set(ids)))
@@ -242,6 +263,16 @@ export default function Home() {
       setError('話者名の保存に失敗しました。');
     }
   }, [speakerLabels, historyReady]);
+
+  useEffect(() => {
+    speakerModeRef.current = speakerMode;
+    if (!historyReady) return;
+    try {
+      saveSpeakerMode(speakerMode);
+    } catch {
+      setError('話者モードの保存に失敗しました。');
+    }
+  }, [speakerMode, historyReady]);
 
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -312,23 +343,51 @@ export default function Home() {
         const mimeType = blob.type || mimeTypeRef.current || 'audio/webm';
         const lang = data.lang || langRef.current;
 
-        const rawTurns =
-          Array.isArray(data.turns) && data.turns.length > 0
-            ? data.turns
-            : text
-              ? [{ speaker: lastSpeakerRef.current ?? 1, text }]
-              : [];
-        const { turns, lastSpeaker } = remapSpeakersContinuity(
-          rawTurns,
-          lastSpeakerRef.current
+        const mode = speakerModeRef.current;
+        const hasWhisperDiarize = Boolean(
+          data.hasDiarizeMarks && data.turns && data.turns.length > 0
         );
-        if (lastSpeaker != null) lastSpeakerRef.current = lastSpeaker;
 
-        if (text.length > 0 || turns.some((t) => t.text.trim())) {
-          const chunks =
-            turns.length > 0
-              ? turns
-              : [{ speaker: lastSpeakerRef.current ?? 1, text }];
+        let chunks: Array<{ speaker?: number; text: string }> = [];
+
+        if (mode === 'auto' && hasWhisperDiarize) {
+          const { turns, lastSpeaker } = remapSpeakersContinuity(
+            data.turns!,
+            lastSpeakerRef.current
+          );
+          if (lastSpeaker != null) lastSpeakerRef.current = lastSpeaker;
+          chunks = turns;
+        } else if (mode === 'auto' && text) {
+          // Pitch / voice-height heuristic when tinydiarize unavailable
+          try {
+            const analysis = await analyzeBlobPitch(blob);
+            const provisional = provisionalTurnsFromPitch(
+              text,
+              analysis,
+              pitchCentroidsRef.current
+            );
+            pitchCentroidsRef.current = provisional.centroids;
+            chunks = provisional.turns;
+            if (chunks.length > 0) {
+              lastSpeakerRef.current =
+                chunks[chunks.length - 1]!.speaker ?? lastSpeakerRef.current;
+            }
+            if (!data.diarize?.used && analysis.medianHz != null) {
+              // Soft notice only when not already showing a whisper warning
+              if (!data.diarize?.warning) {
+                setError('');
+              }
+            }
+          } catch (pitchErr) {
+            console.warn('auto pitch assign failed:', pitchErr);
+            chunks = [{ text, speaker: undefined }];
+          }
+        } else if (text) {
+          // Manual mode: no automatic speaker assignment
+          chunks = [{ text, speaker: undefined }];
+        }
+
+        if (text.length > 0 || chunks.some((t) => t.text.trim())) {
           const newEntries: TranscriptEntry[] = [];
           let note = entriesLenRef.current;
           for (const turn of chunks) {
@@ -572,9 +631,10 @@ export default function Home() {
   };
 
   const speakerDisplayName = (speakerId?: number) => {
-    if (speakerId == null) return '話者?';
+    if (speakerId == null) return '—';
     const custom = speakerLabels[String(speakerId)];
-    return custom?.trim() || `話者${speakerId}`;
+    const letter = defaultSpeakerLabel(speakerId);
+    return custom?.trim() || letter;
   };
 
   const formatEntryForCopy = (e: TranscriptEntry) => {
@@ -599,11 +659,47 @@ export default function Home() {
     setEntries((prev) =>
       prev.map((e) => {
         if (e.id !== entryId) return e;
-        const cur = e.speakerId ?? 0;
-        const next = cur >= 8 ? 1 : cur + 1;
-        return { ...e, speakerId: next };
+        return { ...e, speakerId: nextSpeakerId(e.speakerId) };
       })
     );
+  };
+
+  const reassignAllByPitch = async () => {
+    if (autoAssignBusy) return;
+    setAutoAssignBusy(true);
+    setError('');
+    try {
+      pitchCentroidsRef.current = [];
+      const chronological = [...entries].sort((a, b) => a.note - b.note);
+      const nextEntries = [...entries];
+      for (const entry of chronological) {
+        const seg = await getAudioSegment(entry.id);
+        if (!seg) continue;
+        const analysis = await analyzeBlobPitch(seg.blob);
+        if (analysis.medianHz == null) continue;
+        const assigned = assignSpeakerByPitch(
+          analysis.medianHz,
+          pitchCentroidsRef.current
+        );
+        pitchCentroidsRef.current = assigned.centroids;
+        const idx = nextEntries.findIndex((e) => e.id === entry.id);
+        if (idx >= 0) {
+          nextEntries[idx] = {
+            ...nextEntries[idx]!,
+            speakerId: assigned.speakerId,
+          };
+        }
+      }
+      setEntries(nextEntries);
+      lastSpeakerRef.current =
+        pitchCentroidsRef.current[pitchCentroidsRef.current.length - 1]
+          ?.speakerId ?? null;
+    } catch (e) {
+      console.error('reassign pitch failed:', e);
+      setError('ピッチによる自動話者分けに失敗しました。');
+    } finally {
+      setAutoAssignBusy(false);
+    }
   };
 
   /** Always oldest → newest, independent of which Note screen is open. */
@@ -624,6 +720,7 @@ export default function Home() {
     setAudioIds(new Set());
     setSpeakerLabels({});
     lastSpeakerRef.current = null;
+    pitchCentroidsRef.current = [];
     clearStoredEntries();
     clearStoredSummary();
     clearStoredSpeakerLabels();
@@ -912,8 +1009,8 @@ export default function Home() {
                     className={styles.speakerRenameInput}
                     value={renameDraft}
                     onChange={(ev) => setRenameDraft(ev.target.value)}
-                    placeholder={`話者${speakerId}`}
-                    aria-label="話者名"
+                    placeholder={letterForSpeakerId(speakerId)}
+                    aria-label="話者名（改名）"
                     autoFocus
                   />
                   <button type="submit" className={styles.copyButton}>
@@ -934,7 +1031,7 @@ export default function Home() {
                 <button
                   type="button"
                   className={styles.speakerBadge}
-                  title="タップで名前を変更"
+                  title="タップで改名（手動）"
                   onClick={() => {
                     setRenamingEntryId(entry.id);
                     setRenameDraft(speakerLabels[String(speakerId)] || '');
@@ -948,19 +1045,21 @@ export default function Home() {
                 type="button"
                 className={styles.speakerBadgeMuted}
                 onClick={() => cycleSpeaker(entry.id)}
-                title="話者を割り当て"
+                title="A〜G を割り当て"
               >
-                話者を設定
+                話者 A〜G
               </button>
             )}
-            {speakerId != null && !isRenaming && (
+            {!isRenaming && (
               <button
                 type="button"
                 className={styles.speakerCycle}
                 onClick={() => cycleSpeaker(entry.id)}
-                title="話者番号を切替"
+                title="A → B → C → … → G"
               >
-                切替
+                {speakerId != null
+                  ? `次へ(${letterForSpeakerId(nextSpeakerId(speakerId))})`
+                  : 'A〜G'}
               </button>
             )}
             <span className={styles.langBadge}>{entry.lang}</span>
@@ -1397,16 +1496,59 @@ export default function Home() {
           </p>
         )}
 
-        {diarizeStatus && (
-          <p className={styles.diarizeHint} role="status">
-            {diarizeStatus.active
-              ? `話者分け: 自動オン（${diarizeStatus.mode}）— ラベルはタップで改名できます`
-              : diarizeStatus.enabled
-                ? `話者分け: 手動のみ（自動は未設定）`
-                : '話者分け: 手動ラベル可（自動は WHISPER_DIARIZE=1）'}
-            {diarizeStatus.setupHint ? ` — ${diarizeStatus.setupHint}` : ''}
-          </p>
-        )}
+        <div className={styles.speakerModeBar}>
+          <span className={styles.dockLabel}>話者分け</span>
+          <div
+            className={styles.langToggle}
+            role="group"
+            aria-label="話者分けモード"
+          >
+            <button
+              type="button"
+              className={
+                speakerMode === 'manual'
+                  ? styles.langButtonActive
+                  : styles.langButton
+              }
+              aria-pressed={speakerMode === 'manual'}
+              onClick={() => setSpeakerMode('manual')}
+            >
+              手動
+            </button>
+            <button
+              type="button"
+              className={
+                speakerMode === 'auto'
+                  ? styles.langButtonActive
+                  : styles.langButton
+              }
+              aria-pressed={speakerMode === 'auto'}
+              onClick={() => setSpeakerMode('auto')}
+            >
+              自動
+            </button>
+          </div>
+          {speakerMode === 'auto' && (
+            <button
+              type="button"
+              className={styles.ghostButton}
+              disabled={autoAssignBusy || entries.length === 0}
+              onClick={() => void reassignAllByPitch()}
+            >
+              {autoAssignBusy ? '推定中…' : 'ピッチで付け直す'}
+            </button>
+          )}
+        </div>
+        <p className={styles.diarizeHint} role="status">
+          {speakerMode === 'manual'
+            ? '手動: 各行の A〜G を切替・タップで改名。自動では割り当てません。'
+            : diarizeStatus?.active
+              ? `自動: whisper ${diarizeStatus.mode} を優先。なければ声の高さ（ピッチ）で仮の A/B… を付けます。`
+              : '自動: tinydiarize 未使用のため、録音の声の高さ（ピッチ）で仮の A/B… を付けます（精度は目安）。'}
+          {speakerMode === 'auto' && diarizeStatus?.setupHint
+            ? ` ${diarizeStatus.setupHint}`
+            : ''}
+        </p>
 
         {error && (
           <p className={styles.error} role="alert">

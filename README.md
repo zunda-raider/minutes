@@ -128,7 +128,10 @@ Home の「ジャンル / 文脈」欄に会議の種類を自由入力できま
 
 ## 話者分け（diarization）
 
-セグメントごとに **話者1 / 話者2…** バッジを表示し、タップで名前変更（localStorage `minutes.speakers.labels.v1`）。番号の「切替」や未設定時の「話者を設定」で手動割り当てできます。
+Home の **手動 / 自動** トグルでモードを切り替えます（`minutes.speakers.mode.v1`）。
+
+- **手動:** 各行で **A → B → C → D → E → F → G** を循環割り当て。バッジタップで改名（`minutes.speakers.labels.v1`）。自動では話者を付けません。
+- **自動:** whisper.cpp tinydiarize（`WHISPER_DIARIZE` + tdrz モデル）があればそれを優先。なければブラウザ側で録音の **声の高さ（粗いピッチ）** を推定し、仮の A/B… を付けます。「ピッチで付け直す」で既存行を再推定できます。
 
 ### 自動話者分け（任意）
 
