@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import styles from './page.module.css';
+import {
+  clearStoredEntries,
+  loadEntries,
+  saveEntries,
+} from '@/lib/history-storage';
 
 type LangOption = { code: string; label: string };
 
@@ -57,6 +62,7 @@ export default function Home() {
   const [lang, setLang] = useState('ja');
   const [translateConfigured, setTranslateConfigured] = useState(false);
   const [screen, setScreen] = useState<Screen>('home');
+  const [historyReady, setHistoryReady] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -111,6 +117,24 @@ export default function Home() {
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
+
+  // Hydrate transcript history from localStorage (client only)
+  useEffect(() => {
+    setEntries(loadEntries());
+    setHistoryReady(true);
+  }, []);
+
+  // Persist on every change after hydrate (including clear → [])
+  useEffect(() => {
+    if (!historyReady) return;
+    try {
+      saveEntries(entries);
+    } catch {
+      setError(
+        '履歴の保存に失敗しました（ストレージ容量不足の可能性があります）。'
+      );
+    }
+  }, [entries, historyReady]);
 
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -324,6 +348,7 @@ export default function Home() {
   const clearAll = () => {
     setEntries([]);
     setCopiedId(null);
+    clearStoredEntries();
   };
 
   const translateEntry = async (entry: TranscriptEntry) => {
