@@ -765,6 +765,63 @@
   }
 }
 
+
+/* Compact Note entry on Home (PR #6 home + links) */
+.noteEntryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.noteEntryButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.noteEntryButton {
+  appearance: none;
+  border: 1px solid var(--border);
+  min-height: 40px;
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text);
+  background: rgba(91, 140, 255, 0.12);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.noteEntryButton:hover {
+  background: rgba(91, 140, 255, 0.22);
+  border-color: rgba(91, 140, 255, 0.45);
+}
+
+.noteEntryHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  flex: 1 1 12rem;
+}
+
+@media (max-width: 760px) {
+  .noteEntryButtons {
+    width: 100%;
+  }
+
+  .noteEntryButton {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .recordButtonActive,
   .dotPulse {

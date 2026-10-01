@@ -318,7 +318,6 @@ export default function Home() {
     await copyText('__all__', all);
   };
 
-  const latestEntry = entries.length > 0 ? entries[entries.length - 1] : null;
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
 
@@ -548,6 +547,7 @@ export default function Home() {
     );
   }
 
+  // Home = PR #6 polished control UI + compact Note entry points
   return (
     <div className={styles.app}>
       <div className={styles.bgGlow} aria-hidden="true" />
@@ -562,7 +562,7 @@ export default function Home() {
         </div>
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
-          <span className={styles.metaChip}>{entries.length} saved</span>
+          <span className={styles.metaChip}>{entries.length} segments</span>
         </div>
       </header>
 
@@ -639,66 +639,86 @@ export default function Home() {
         )}
       </aside>
 
-      <section className={styles.homePreview}>
-        <div className={styles.previewHeader}>
-          <h2 className={styles.feedTitle}>Latest</h2>
-          <p className={styles.feedCount}>Live peek · full history in Notes</p>
-        </div>
-        {latestEntry ? (
-          <article className={styles.previewCard}>
-            <div className={styles.entryMeta}>
-              <div className={styles.entryMetaLeft}>
-                <span className={styles.entryIndex}>#{latestEntry.note}</span>
-                <span className={styles.langBadge}>{latestEntry.lang}</span>
-                <time className={styles.entryTime} dateTime={latestEntry.at}>
-                  {formatTime(latestEntry.at)}
-                </time>
-              </div>
-            </div>
-            <pre className={styles.transcript}>{latestEntry.text}</pre>
-          </article>
-        ) : (
-          <div className={styles.emptyStateCompact}>
-            <p className={styles.emptyBody}>
-              {isTranscribing
-                ? 'First segment is on the way…'
-                : 'Nothing yet. Start recording to capture the meeting.'}
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className={styles.noteGate}>
-        <h2 className={styles.feedTitle}>Open notes</h2>
-        <p className={styles.gateHint}>
-          Same history, two reading layouts. Copy all always pastes oldest → newest.
-        </p>
-        <div className={styles.noteCards}>
+      <nav className={styles.noteEntryBar} aria-label="Notes">
+        <span className={styles.dockLabel}>Notes</span>
+        <div className={styles.noteEntryButtons}>
           <button
             type="button"
-            className={styles.noteCard}
+            className={styles.noteEntryButton}
             onClick={() => setScreen('note1')}
           >
-            <span className={styles.noteCardKicker}>Note 1</span>
-            <span className={styles.noteCardTitle}>古い順</span>
-            <span className={styles.noteCardDesc}>
-              Timeline from the start of the meeting — best for reading & pasting.
-            </span>
-            <span className={styles.noteCardCta}>Open →</span>
+            Note 1 · 古い順
           </button>
           <button
             type="button"
-            className={styles.noteCard}
+            className={styles.noteEntryButton}
             onClick={() => setScreen('note2')}
           >
-            <span className={styles.noteCardKicker}>Note 2</span>
-            <span className={styles.noteCardTitle}>新しい順</span>
-            <span className={styles.noteCardDesc}>
-              Newest segments on top — best while the meeting is still running.
-            </span>
-            <span className={styles.noteCardCta}>Open →</span>
+            Note 2 · 新しい順
           </button>
         </div>
+        <p className={styles.noteEntryHint}>
+          Open a Note screen to browse the full timeline
+        </p>
+      </nav>
+
+      <section className={styles.feed}>
+        <div className={styles.feedHeader}>
+          <div>
+            <h2 className={styles.feedTitle}>Transcript</h2>
+            <p className={styles.feedCount}>
+              {entries.length} segments · newest on top (home preview)
+            </p>
+          </div>
+          <div className={styles.feedActions}>
+            {untranslatedEn.length > 0 && (
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={translateAllEnglish}
+                disabled={translatingIds.size > 0}
+              >
+                {translateConfigured
+                  ? `Translate all EN (${untranslatedEn.length})`
+                  : 'Translate all EN'}
+              </button>
+            )}
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={copyAll}
+              disabled={entries.length === 0}
+            >
+              {copiedId === '__all__' ? 'Copied' : 'Copy all'}
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButtonDanger}
+              onClick={clearAll}
+              disabled={entries.length === 0}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        {entries.length === 0 ? (
+          <div className={styles.emptyState}>
+            <div className={styles.emptyOrb} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>
+              {isTranscribing ? 'Waiting for the first segment' : 'Ready when you are'}
+            </h3>
+            <p className={styles.emptyBody}>
+              {isTranscribing
+                ? 'Audio is queued for Whisper. New text will appear here.'
+                : 'Hit Record to capture mic audio. Use Note 1 / Note 2 to browse history in either order.'}
+            </p>
+          </div>
+        ) : (
+          <ul className={styles.entryList}>
+            {note2Entries.map(renderEntryCard)}
+          </ul>
+        )}
       </section>
     </div>
   );
