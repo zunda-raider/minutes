@@ -113,6 +113,11 @@ npm run dev
 ブラウザで [http://localhost:3000](http://localhost:3000) を開き、言語（日本語 / English）を選んでから「録音開始」→「停止」で文字起こしします。
 許可言語は `WHISPER_LANGS`（UI は `/api/config` 経由で同期）。
 
+
+## 履歴の永続化
+
+文字起こし履歴（`id` / `note` / `text` / `lang` / `at` / `textJa`）はブラウザの **localStorage**（キー `minutes.transcript.entries.v1`）に保存され、リロード後も残ります。Home / Note 1 / Note 2 は同じストアを参照します。「履歴をクリア」で削除します。
+
 ## 使い方の注意
 
 - マイク許可が必要です。
