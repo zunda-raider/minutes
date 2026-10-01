@@ -71,6 +71,10 @@ export default function Home() {
   const [summary, setSummary] = useState('');
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [genre, setGenre] = useState('');
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const summaryRef = useRef<HTMLElement | null>(null);
+  const genreInputRef = useRef<HTMLInputElement | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -434,51 +438,93 @@ export default function Home() {
     }
   };
 
+  const openSummaryPanel = () => {
+    setSummaryOpen(true);
+    setMenuOpen(false);
+    window.setTimeout(() => {
+      summaryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
   const renderSummaryPanel = () => (
-    <section className={styles.summaryPanel}>
-      <div className={styles.summaryHeader}>
-        <div>
-          <h2 className={styles.feedTitle}>要約</h2>
-          <p className={styles.feedCount}>
-            Ollama · 決定 / アクション / トピック
-            {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
-          </p>
-        </div>
-        <div className={styles.feedActions}>
-          <button
-            type="button"
-            className={styles.ghostButton}
-            onClick={runSummary}
-            disabled={entries.length === 0 || isSummarizing}
-          >
-            {isSummarizing ? '要約中…' : '要約'}
-          </button>
-          <button
-            type="button"
-            className={styles.ghostButton}
-            onClick={() => summary && copyText('__summary__', summary)}
-            disabled={!summary}
-          >
-            {copiedId === '__summary__' ? 'Copied' : '要約をコピー'}
-          </button>
-          <button
-            type="button"
-            className={styles.ghostButtonDanger}
-            onClick={clearSummaryOnly}
-            disabled={!summary}
-          >
-            要約クリア
-          </button>
-        </div>
-      </div>
-      {summary ? (
-        <pre className={styles.summaryBody}>{summary}</pre>
+    <section
+      ref={summaryRef}
+      className={
+        summaryOpen ? styles.summaryPanelExpanded : styles.summaryPanelCollapsed
+      }
+    >
+      {!summaryOpen ? (
+        <button
+          type="button"
+          className={styles.summaryChip}
+          onClick={openSummaryPanel}
+          aria-expanded={false}
+        >
+          <span className={styles.summaryChipLabel}>要約</span>
+          <span className={styles.summaryChipMeta}>
+            {isSummarizing
+              ? '生成中…'
+              : summary
+                ? '保存済み · タップで展開'
+                : 'たたみ表示 · タップで開く'}
+          </span>
+          <span className={styles.summaryChipChevron} aria-hidden="true" />
+        </button>
       ) : (
-        <p className={styles.summaryEmpty}>
-          {entries.length === 0
-            ? '文字起こしがあると要約できます。'
-            : '「要約」を押すと会議の決定・アクションをまとめます。'}
-        </p>
+        <>
+          <div className={styles.summaryHeader}>
+            <div>
+              <h2 className={styles.feedTitle}>要約</h2>
+              <p className={styles.feedCount}>
+                Ollama · 決定 / アクション / トピック
+                {genre.trim() ? ` · 文脈: ${genre.trim()}` : ''}
+              </p>
+            </div>
+            <div className={styles.feedActions}>
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={runSummary}
+                disabled={entries.length === 0 || isSummarizing}
+              >
+                {isSummarizing ? '要約中…' : '要約を生成'}
+              </button>
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={() => summary && copyText('__summary__', summary)}
+                disabled={!summary}
+              >
+                {copiedId === '__summary__' ? 'Copied' : '要約をコピー'}
+              </button>
+              <button
+                type="button"
+                className={styles.ghostButtonDanger}
+                onClick={clearSummaryOnly}
+                disabled={!summary}
+              >
+                要約クリア
+              </button>
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={() => setSummaryOpen(false)}
+                aria-expanded={true}
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+          {summary ? (
+            <pre className={styles.summaryBody}>{summary}</pre>
+          ) : (
+            <p className={styles.summaryEmpty}>
+              {entries.length === 0
+                ? '文字起こしがあると要約できます。'
+                : '「要約を生成」で会議の決定・アクションをまとめます。'}
+            </p>
+          )}
+        </>
       )}
     </section>
   );
@@ -726,8 +772,107 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
           <span className={styles.metaChip}>{entries.length} segments</span>
+          <button
+            type="button"
+            className={styles.menuButton}
+            aria-label="メニュー"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen(true)}
+          >
+            <span className={styles.menuIcon} aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
         </div>
       </header>
+
+      {menuOpen && (
+        <div className={styles.menuRoot}>
+          <button
+            type="button"
+            className={styles.menuBackdrop}
+            aria-label="メニューを閉じる"
+            onClick={() => setMenuOpen(false)}
+          />
+          <aside className={styles.menuDrawer} role="dialog" aria-modal="true" aria-label="メニュー">
+            <div className={styles.menuDrawerHeader}>
+              <h2 className={styles.menuDrawerTitle}>Menu</h2>
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={() => setMenuOpen(false)}
+              >
+                閉じる
+              </button>
+            </div>
+            <nav className={styles.menuNav}>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setScreen('note1');
+                }}
+              >
+                <span className={styles.menuItemTitle}>Note 1 · 古い順</span>
+                <span className={styles.menuItemDesc}>タイムラインを最初から読む</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setScreen('note2');
+                }}
+              >
+                <span className={styles.menuItemTitle}>Note 2 · 新しい順</span>
+                <span className={styles.menuItemDesc}>最新セグメントを上に表示</span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={openSummaryPanel}
+              >
+                <span className={styles.menuItemTitle}>要約</span>
+                <span className={styles.menuItemDesc}>
+                  {summary ? '保存済み要約を展開' : '要約パネルを開く'}
+                </span>
+              </button>
+            </nav>
+            <div className={styles.menuGenre}>
+              <label htmlFor="meeting-genre" className={styles.dockLabel}>
+                ジャンル / 文脈
+              </label>
+              <input
+                id="meeting-genre"
+                ref={genreInputRef}
+                className={styles.genreInput}
+                type="text"
+                value={genre}
+                onChange={(e) => setGenre(e.target.value)}
+                placeholder="例: 週次エンジニア定例 / 採用面接"
+                autoComplete="off"
+              />
+              <p className={styles.genreHint}>
+                翻訳・要約の精度向上（任意）
+              </p>
+            </div>
+            <button
+              type="button"
+              className={styles.menuDanger}
+              onClick={() => {
+                clearAll();
+                setMenuOpen(false);
+              }}
+              disabled={entries.length === 0 && !summary}
+            >
+              履歴をクリア
+            </button>
+          </aside>
+        </div>
+      )}
 
       <aside className={styles.controlDock}>
         <div className={styles.dockInner}>
@@ -802,46 +947,6 @@ export default function Home() {
         )}
       </aside>
 
-      <section className={styles.genreField}>
-        <label htmlFor="meeting-genre" className={styles.dockLabel}>
-          ジャンル / 文脈
-        </label>
-        <input
-          id="meeting-genre"
-          className={styles.genreInput}
-          type="text"
-          value={genre}
-          onChange={(e) => setGenre(e.target.value)}
-          placeholder="例: 週次エンジニア定例 / 採用面接 / 営業キックオフ"
-          autoComplete="off"
-        />
-        <p className={styles.genreHint}>
-          任意。翻訳・要約の精度向上に使います（空なら従来どおり）。
-        </p>
-      </section>
-
-      <nav className={styles.noteEntryBar} aria-label="Notes">
-        <span className={styles.dockLabel}>Notes</span>
-        <div className={styles.noteEntryButtons}>
-          <button
-            type="button"
-            className={styles.noteEntryButton}
-            onClick={() => setScreen('note1')}
-          >
-            Note 1 · 古い順
-          </button>
-          <button
-            type="button"
-            className={styles.noteEntryButton}
-            onClick={() => setScreen('note2')}
-          >
-            Note 2 · 新しい順
-          </button>
-        </div>
-        <p className={styles.noteEntryHint}>
-          Open a Note screen to browse the full timeline
-        </p>
-      </nav>
 
       {renderSummaryPanel()}
 
