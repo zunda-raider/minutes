@@ -25,9 +25,18 @@ type TranscriptEntry = {
 };
 
 type Screen = 'home' | 'note1' | 'note2';
+type AudioSource = 'mic' | 'system';
 
 /** How often to cut a segment and send it to Whisper while still recording. */
 const SEGMENT_MS = 25_000;
+
+const SYSTEM_AUDIO_HELP =
+  '画面共有ダイアログで「システム音声を共有」をオンにしてください。macOS で音声が取れない場合は BlackHole などの仮想オーディオを入れ、Zoom の出力をそこへルーティングしてから「マイク」モードで録音してください。';
+
+type DisplayMediaOptionsWithSystemAudio = DisplayMediaStreamOptions & {
+  systemAudio?: 'include' | 'exclude';
+  windowAudio?: 'system' | 'window' | 'exclude';
+};
 
 function pickMimeType(): string {
   return MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -73,6 +82,7 @@ export default function Home() {
   const [genre, setGenre] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const summaryRef = useRef<HTMLElement | null>(null);
   const genreInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -310,16 +320,59 @@ export default function Home() {
     recorder.stop();
   }, []);
 
+  const acquireAudioStream = async (
+    source: AudioSource
+  ): Promise<MediaStream> => {
+    if (source === 'mic') {
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }
+
+    const options: DisplayMediaOptionsWithSystemAudio = {
+      video: true,
+      audio: true,
+      systemAudio: 'include',
+      windowAudio: 'system',
+    };
+    const displayStream = await navigator.mediaDevices.getDisplayMedia(options);
+    const audioTracks = displayStream.getAudioTracks();
+    // Whisper only needs audio; drop the video track to keep blobs small.
+    displayStream.getVideoTracks().forEach((track) => track.stop());
+
+    if (audioTracks.length === 0) {
+      displayStream.getTracks().forEach((track) => track.stop());
+      const err = new Error('NO_SYSTEM_AUDIO');
+      err.name = 'NoSystemAudioError';
+      throw err;
+    }
+
+    return new MediaStream(audioTracks);
+  };
+
   const startRecording = async () => {
     setError('');
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await acquireAudioStream(audioSource);
     } catch (e) {
-      console.error('マイク許可エラー:', e);
+      const err = e as DOMException | Error;
+      console.error('音声ソース取得エラー:', err);
+      if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
+        setError(
+          audioSource === 'system'
+            ? '画面共有がキャンセルされたか、許可されませんでした。'
+            : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
+        );
+        return;
+      }
+      if (err.name === 'NoSystemAudioError' || err.message === 'NO_SYSTEM_AUDIO') {
+        setError(SYSTEM_AUDIO_HELP);
+        return;
+      }
       setError(
-        'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
+        audioSource === 'system'
+          ? `Zoom / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`
+          : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
       );
       return;
     }
@@ -328,6 +381,23 @@ export default function Home() {
     mimeTypeRef.current = pickMimeType();
     wantRecordingRef.current = true;
     rotateAfterStopRef.current = false;
+
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        if (!wantRecordingRef.current) return;
+        wantRecordingRef.current = false;
+        rotateAfterStopRef.current = false;
+        clearSegmentTimer();
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state !== 'inactive') {
+          recorder.stop();
+        } else {
+          stopTracks();
+          setIsRecording(false);
+        }
+        setError('画面共有が終了したため録音を停止しました。');
+      };
+    });
 
     startRecorderOnStream();
     setIsRecording(true);
@@ -770,8 +840,8 @@ export default function Home() {
           </div>
         </div>
         <div className={styles.topMeta}>
-          <span className={styles.metaChip}>~{SEGMENT_MS / 1000}s segments</span>
-          <span className={styles.metaChip}>{entries.length} segments</span>
+          <span className={styles.metaChip}>約{SEGMENT_MS / 1000}秒区切り</span>
+          <span className={styles.metaChip}>{entries.length}件</span>
           <button
             type="button"
             className={styles.menuButton}
@@ -877,6 +947,42 @@ export default function Home() {
       <aside className={styles.controlDock}>
         <div className={styles.dockInner}>
           <div className={styles.dockGroup}>
+            <span className={styles.dockLabel}>音声ソース</span>
+            <div
+              className={styles.langToggle}
+              role="group"
+              aria-label="音声ソース"
+            >
+              <button
+                type="button"
+                className={
+                  audioSource === 'mic'
+                    ? styles.langButtonActive
+                    : styles.langButton
+                }
+                disabled={isRecording}
+                aria-pressed={audioSource === 'mic'}
+                onClick={() => setAudioSource('mic')}
+              >
+                マイク
+              </button>
+              <button
+                type="button"
+                className={
+                  audioSource === 'system'
+                    ? styles.langButtonActive
+                    : styles.langButton
+                }
+                disabled={isRecording}
+                aria-pressed={audioSource === 'system'}
+                onClick={() => setAudioSource('system')}
+              >
+                Zoom / システム
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.dockGroup}>
             <span className={styles.dockLabel}>Language</span>
             <div className={styles.langToggle} role="group" aria-label="Language">
               {langs.map((opt) => (
@@ -940,6 +1046,12 @@ export default function Home() {
           </div>
         </div>
 
+        {audioSource === 'system' && !isRecording && (
+          <p className={styles.audioSourceHint}>
+            Zoom / 会議タブを共有し、「システム音声を共有」をオンにします。取れないときは BlackHole 等でマイクへ迂回。
+          </p>
+        )}
+
         {error && (
           <p className={styles.error} role="alert">
             {error}
@@ -947,6 +1059,24 @@ export default function Home() {
         )}
       </aside>
 
+      <div className={styles.noteEntryBar}>
+        <div className={styles.noteEntryButtons}>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={() => setScreen('note1')}
+          >
+            Note 1 · 古い順
+          </button>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={() => setScreen('note2')}
+          >
+            Note 2 · 新しい順
+          </button>
+        </div>
+      </div>
 
       {renderSummaryPanel()}
 
@@ -955,7 +1085,9 @@ export default function Home() {
           <div>
             <h2 className={styles.feedTitle}>Transcript</h2>
             <p className={styles.feedCount}>
-              {entries.length} segments · newest on top (home preview)
+              {entries.length === 0
+                ? 'まだありません'
+                : `${entries.length}件 · 新しい順`}
             </p>
           </div>
           <div className={styles.feedActions}>
@@ -994,12 +1126,12 @@ export default function Home() {
           <div className={styles.emptyState}>
             <div className={styles.emptyOrb} aria-hidden="true" />
             <h3 className={styles.emptyTitle}>
-              {isTranscribing ? 'Waiting for the first segment' : 'Ready when you are'}
+              {isTranscribing ? '最初の文字起こしを待っています' : '録音の準備ができました'}
             </h3>
             <p className={styles.emptyBody}>
               {isTranscribing
-                ? 'Audio is queued for Whisper. New text will appear here.'
-                : 'Hit Record to capture mic audio. Use Note 1 / Note 2 to browse history in either order.'}
+                ? '音声を Whisper に送っています。結果がここに表示されます。'
+                : '音声ソース（マイク / Zoom・システム）を選び、Record を押してください。Note 1 / Note 2 で履歴を閲覧できます。'}
             </p>
           </div>
         ) : (
