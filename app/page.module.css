@@ -788,14 +788,14 @@
 .noteEntryButton {
   appearance: none;
   border: 1px solid var(--border);
-  min-height: 40px;
-  padding: 0.45rem 0.95rem;
+  min-height: 52px;
+  padding: 0.7rem 1.25rem;
   border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
   cursor: pointer;
   color: var(--text);
-  background: rgba(91, 140, 255, 0.12);
+  background: rgba(91, 140, 255, 0.14);
   transition: background 0.15s, border-color 0.15s;
 }
 
@@ -951,9 +951,9 @@
 .menuButton {
   appearance: none;
   border: 1px solid var(--border);
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -970,13 +970,13 @@
 .menuIcon {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  width: 16px;
+  gap: 6px;
+  width: 22px;
 }
 
 .menuIcon span {
   display: block;
-  height: 2px;
+  height: 2.5px;
   width: 100%;
   border-radius: 2px;
   background: currentColor;
@@ -1036,14 +1036,16 @@
   appearance: none;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 0.85rem 0.95rem;
+  padding: 1.05rem 1.1rem;
+  min-height: 72px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
   text-align: left;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.3rem;
+  justify-content: center;
 }
 
 .menuItem:hover {
@@ -1053,12 +1055,12 @@
 
 .menuItemTitle {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
 }
 
 .menuItemDesc {
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 .menuGenre {
@@ -1087,6 +1089,14 @@
 .menuDanger:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+
+.audioSourceHint {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 @media (prefers-reduced-motion: reduce) {
