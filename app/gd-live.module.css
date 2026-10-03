@@ -169,6 +169,8 @@
 
 .go:disabled,
 .stop:disabled,
+.speed:disabled,
+.speedOn:disabled,
 .topicForm button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -311,10 +313,15 @@
   background: #f6d48a;
 }
 
-.dummyNote {
+.dummyNote,
+.captureError {
   margin: 0;
   color: rgba(248, 241, 227, 0.62);
   font-size: 0.75rem;
+}
+
+.captureError {
+  color: #fda4af;
 }
 
 .board {

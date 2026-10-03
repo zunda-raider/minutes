@@ -11,9 +11,21 @@ import {
   GD_SILENCE_MS,
   type DemoLine,
 } from '@/lib/gd-live-demo';
+import { transcribeZoomChunk } from '@/lib/transcribe-zoom';
+import {
+  SYSTEM_AUDIO_HELP,
+  acquireSystemAudio,
+  openSelfMic,
+  startZoomSegmentRecorder,
+  type ZoomChunk,
+  type ZoomRecorder,
+} from '@/lib/zoom-capture';
 
 type Speed = 1 | 2 | 4;
 type Phase = 'idle' | 'live' | 'ended';
+type Feed = 'live' | 'demo';
+
+type BoardLine = DemoLine & { id: string };
 
 type TopicMark = {
   id: string;
@@ -28,6 +40,7 @@ type Props = {
 };
 
 const SPEEDS: Speed[] = [1, 2, 4];
+const MIC_WARN = 'マイクが使えないため、発言はすべて他者側に載ります。';
 
 function formatClock(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000 - 1e-9));
@@ -47,12 +60,13 @@ function silenceColor(gapMs: number): string {
 }
 
 /** Room below this card before it hits the previous line in the same lane. */
-function sameLaneSlot(index: number): number {
-  const line = GD_DEMO_LINES[index];
+function sameLaneSlot(lines: BoardLine[], index: number): number {
+  const line = lines[index];
+  if (!line) return GD_MAX_CARD_PX;
   let older = -1;
   for (let i = index - 1; i >= 0; i -= 1) {
-    if (GD_DEMO_LINES[i].speaker === line.speaker) {
-      older = GD_DEMO_LINES[i].atSec;
+    if (lines[i]!.speaker === line.speaker) {
+      older = lines[i]!.atSec;
       break;
     }
   }
@@ -94,13 +108,31 @@ function SpeechCard({
   );
 }
 
+function captureErrorMessage(err: unknown): string {
+  const name = err instanceof Error ? err.name : '';
+  const message = err instanceof Error ? err.message : '';
+  if (name === 'AbortError' || name === 'NotAllowedError') {
+    return '画面共有がキャンセルされたか、許可されませんでした。';
+  }
+  if (name === 'NoSystemAudioError' || message === 'NO_SYSTEM_AUDIO') {
+    return SYSTEM_AUDIO_HELP;
+  }
+  return `アプリ / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`;
+}
+
 export function GdLive({ onBack, onHarbor }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
+  const [feed, setFeed] = useState<Feed>('live');
   const [speed, setSpeed] = useState<Speed>(1);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [goal, setGoal] = useState('');
   const [topicDraft, setTopicDraft] = useState('');
   const [topics, setTopics] = useState<TopicMark[]>([]);
+  const [utterances, setUtterances] = useState<BoardLine[]>([]);
+  const [pending, setPending] = useState(0);
+  const [arming, setArming] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [micWarn, setMicWarn] = useState('');
 
   const baseRef = useRef(0);
   const originRef = useRef(0);
@@ -108,6 +140,20 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const elapsedRef = useRef(0);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const topicSeq = useRef(1);
+  const captureRef = useRef<ZoomRecorder | null>(null);
+  const aliveRef = useRef(true);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const feedRef = useRef<Feed>('live');
+  feedRef.current = feed;
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      captureRef.current?.stop();
+      captureRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (phase !== 'live') return;
@@ -130,8 +176,13 @@ export function GdLive({ onBack, onHarbor }: Props) {
     return () => cancelAnimationFrame(frame);
   }, [phase]);
 
-  function start() {
+  useEffect(() => {
     if (phase === 'live') return;
+    captureRef.current?.stop();
+    captureRef.current = null;
+  }, [phase]);
+
+  function beginClock() {
     baseRef.current = 0;
     originRef.current = performance.now();
     elapsedRef.current = 0;
@@ -147,6 +198,97 @@ export function GdLive({ onBack, onHarbor }: Props) {
     setPhase('live');
   }
 
+  function enqueueChunk(chunk: ZoomChunk) {
+    setPending((count) => count + 1);
+    queueRef.current = queueRef.current.then(async () => {
+      try {
+        const found = await transcribeZoomChunk(chunk.systemBlob, chunk.micBlob, 'ja');
+        if (!aliveRef.current || found.length === 0) return;
+        setUtterances((prev) => [
+          ...prev,
+          ...found.map((line, index) => ({
+            id: `${chunk.offsetSec.toFixed(3)}-${line.startSec.toFixed(3)}-${index}-${Math.random().toString(36).slice(2, 6)}`,
+            atSec: chunk.offsetSec + line.startSec,
+            speaker: line.speaker,
+            text: line.text,
+          })),
+        ]);
+      } catch (err) {
+        console.error('gd live transcribe failed:', err);
+        if (!aliveRef.current) return;
+        setNotice(err instanceof Error ? err.message : '文字起こしに失敗しました。');
+      } finally {
+        if (aliveRef.current) setPending((count) => Math.max(0, count - 1));
+      }
+    });
+  }
+
+  function onCaptureEnded(reason: 'stopped' | 'share-ended' | 'error') {
+    captureRef.current = null;
+    if (!aliveRef.current) return;
+    if (reason === 'share-ended') {
+      setNotice('画面共有が終了したため録音を停止しました。');
+    } else if (reason === 'error') {
+      setNotice('録音中にエラーが発生しました。');
+    }
+    setPhase((current) => (current === 'live' ? 'ended' : current));
+  }
+
+  async function start() {
+    if (phase === 'live' || arming) return;
+    setNotice('');
+    if (feedRef.current === 'demo') {
+      setMicWarn('');
+      beginClock();
+      return;
+    }
+
+    setArming(true);
+    setMicWarn('');
+    speedRef.current = 1;
+    setSpeed(1);
+    const selfMicPromise = openSelfMic();
+    let stream: MediaStream;
+    try {
+      stream = await acquireSystemAudio();
+    } catch (err) {
+      const leftover = await selfMicPromise;
+      leftover?.getTracks().forEach((track) => track.stop());
+      console.error('GD live capture failed:', err);
+      if (aliveRef.current) setNotice(captureErrorMessage(err));
+      setArming(false);
+      return;
+    }
+
+    const mic = await selfMicPromise;
+    if (!aliveRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      mic?.getTracks().forEach((track) => track.stop());
+      setArming(false);
+      return;
+    }
+    if (!mic) setMicWarn(MIC_WARN);
+
+    let failedSync = false;
+    const handle = startZoomSegmentRecorder({
+      system: stream,
+      mic,
+      onChunk: enqueueChunk,
+      onEnded: (reason) => {
+        failedSync = true;
+        onCaptureEnded(reason);
+      },
+    });
+    setArming(false);
+    if (!aliveRef.current || failedSync) {
+      handle.stop();
+      return;
+    }
+    captureRef.current = handle;
+    setUtterances([]);
+    beginClock();
+  }
+
   function stop() {
     if (phase !== 'live') return;
     const ms = Math.min(
@@ -156,10 +298,13 @@ export function GdLive({ onBack, onHarbor }: Props) {
     baseRef.current = ms;
     elapsedRef.current = ms;
     setElapsedMs(ms);
+    captureRef.current?.stop();
+    captureRef.current = null;
     setPhase('ended');
   }
 
   function chooseSpeed(next: Speed) {
+    if (feed !== 'demo') return;
     if (next === speedRef.current) return;
     if (phase === 'live') {
       const now = performance.now();
@@ -174,6 +319,18 @@ export function GdLive({ onBack, onHarbor }: Props) {
     }
     speedRef.current = next;
     setSpeed(next);
+  }
+
+  function chooseFeed(next: Feed) {
+    if (phase === 'live' || arming || next === feed) return;
+    setFeed(next);
+    setNotice('');
+    if (next === 'live') {
+      speedRef.current = 1;
+      setSpeed(1);
+    } else {
+      setMicWarn('');
+    }
   }
 
   function addTopic(event: FormEvent) {
@@ -192,9 +349,15 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const trackPx =
     phase === 'idle' ? 0 : (elapsedMs / 1000) * GD_PX_PER_SEC + GD_MAX_CARD_PX + 28;
 
-  const shown = GD_DEMO_LINES.map((line, index) => ({ line, index })).filter(
-    ({ line }) => phase !== 'idle' && line.atSec * 1000 <= elapsedMs + 0.5
-  );
+  const script: BoardLine[] =
+    feed === 'demo'
+      ? GD_DEMO_LINES.map((line, index) => ({ ...line, id: `demo-${index}` }))
+      : [...utterances].sort((a, b) => a.atSec - b.atSec || a.id.localeCompare(b.id));
+
+  const timeSlack = feed === 'demo' ? 0.5 : 2000;
+  const shown = script
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => phase !== 'idle' && line.atSec * 1000 <= elapsedMs + timeSlack);
 
   const selfTimes = shown
     .filter(({ line }) => line.speaker === '自分')
@@ -217,11 +380,11 @@ export function GdLive({ onBack, onHarbor }: Props) {
     if (selfTimes.length === 0) {
       pushBand(0, elapsedMs, true);
     } else {
-      pushBand(0, selfTimes[0], false);
+      pushBand(0, selfTimes[0]!, false);
       for (let i = 1; i < selfTimes.length; i += 1) {
-        pushBand(selfTimes[i - 1], selfTimes[i], false);
+        pushBand(selfTimes[i - 1]!, selfTimes[i]!, false);
       }
-      pushBand(selfTimes[selfTimes.length - 1], elapsedMs, true);
+      pushBand(selfTimes[selfTimes.length - 1]!, elapsedMs, true);
     }
   }
 
@@ -235,6 +398,18 @@ export function GdLive({ onBack, onHarbor }: Props) {
         }));
 
   const phaseLabel = phase === 'live' ? '議論中' : phase === 'ended' ? '終了' : '待機';
+  const statusText =
+    notice ||
+    (pending > 0 ? `文字起こし中 ${pending}件` : '') ||
+    micWarn ||
+    (feed === 'demo'
+      ? 'デモの発言です。速度だけ変えられます。'
+      : '本番はZoomのシステム音声です。マイクは自分の判定に使います。');
+
+  const idleHint =
+    feed === 'demo'
+      ? '開始すると、ダミーの発言が実時間で上に出ます。左が他者、右が自分。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。'
+      : '開始すると、画面共有でZoomなどの音声を取ります。Whisperの区間が、左は他者・右は自分で載ります。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。';
 
   return (
     <div className={styles.stage}>
@@ -259,8 +434,13 @@ export function GdLive({ onBack, onHarbor }: Props) {
             <span className={styles.remainTime}>{formatClock(remainMs)}</span>
           </p>
           <div className={styles.transport}>
-            <button type="button" className={styles.go} onClick={start} disabled={running}>
-              開始
+            <button
+              type="button"
+              className={styles.go}
+              onClick={() => void start()}
+              disabled={running || arming}
+            >
+              {arming ? '許可待ち' : '開始'}
             </button>
             <button type="button" className={styles.stop} onClick={stop} disabled={!running}>
               終了
@@ -318,20 +498,44 @@ export function GdLive({ onBack, onHarbor }: Props) {
         </div>
 
         <div className={styles.metaRow}>
-          <div className={styles.speeds} role="group" aria-label="ダミーの速度">
-            {SPEEDS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={speed === value}
-                className={speed === value ? styles.speedOn : styles.speed}
-                onClick={() => chooseSpeed(value)}
-              >
-                {value}x
-              </button>
-            ))}
+          <div className={styles.speeds} role="group" aria-label="音声の出どころ">
+            <button
+              type="button"
+              className={feed === 'live' ? styles.speedOn : styles.speed}
+              aria-pressed={feed === 'live'}
+              disabled={running || arming}
+              onClick={() => chooseFeed('live')}
+            >
+              本番
+            </button>
+            <button
+              type="button"
+              className={feed === 'demo' ? styles.speedOn : styles.speed}
+              aria-pressed={feed === 'demo'}
+              disabled={running || arming}
+              onClick={() => chooseFeed('demo')}
+            >
+              デモ
+            </button>
           </div>
-          <p className={styles.dummyNote}>ダミーの発言です。音声はまだ繋がっていません。</p>
+          {feed === 'demo' ? (
+            <div className={styles.speeds} role="group" aria-label="ダミーの速度">
+              {SPEEDS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={speed === value}
+                  className={speed === value ? styles.speedOn : styles.speed}
+                  onClick={() => chooseSpeed(value)}
+                >
+                  {value}x
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <p className={notice ? styles.captureError : styles.dummyNote} role={notice ? 'alert' : undefined}>
+            {statusText}
+          </p>
         </div>
       </header>
 
@@ -394,10 +598,10 @@ export function GdLive({ onBack, onHarbor }: Props) {
                 .filter(({ line }) => line.speaker === '他者')
                 .map(({ line, index }) => (
                   <SpeechCard
-                    key={`${line.speaker}-${line.atSec}`}
+                    key={line.id}
                     line={line}
                     top={((elapsedMs - line.atSec * 1000) / 1000) * GD_PX_PER_SEC}
-                    maxPx={sameLaneSlot(index)}
+                    maxPx={sameLaneSlot(script, index)}
                   />
                 ))}
             </div>
@@ -418,18 +622,14 @@ export function GdLive({ onBack, onHarbor }: Props) {
                 .filter(({ line }) => line.speaker === '自分')
                 .map(({ line, index }) => (
                   <SpeechCard
-                    key={`${line.speaker}-${line.atSec}`}
+                    key={line.id}
                     line={line}
                     top={((elapsedMs - line.atSec * 1000) / 1000) * GD_PX_PER_SEC}
-                    maxPx={sameLaneSlot(index)}
+                    maxPx={sameLaneSlot(script, index)}
                   />
                 ))}
             </div>
-            {phase === 'idle' ? (
-              <p className={styles.idleHint}>
-                開始すると、ダミーの発言が実時間で上に出ます。左が他者、右が自分。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。
-              </p>
-            ) : null}
+            {phase === 'idle' ? <p className={styles.idleHint}>{idleHint}</p> : null}
           </div>
         </div>
       </div>

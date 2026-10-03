@@ -58,6 +58,13 @@ import {
 } from '@/lib/audio-storage';
 import { buildStoreZip } from '@/lib/zip-store';
 import { GdScreen } from './gd-screen';
+import {
+  SYSTEM_AUDIO_HELP,
+  ZOOM_SEGMENT_MS,
+  acquireSystemAudio,
+  openSelfMic,
+  pickRecorderMimeType,
+} from '@/lib/zoom-capture';
 
 type LangOption = { code: string; label: string };
 
@@ -78,23 +85,8 @@ type TranscriptEntry = {
 type Screen = 'home' | 'note1' | 'note2' | 'gd';
 type AudioSource = 'mic' | 'system';
 
-/** Mic: shorter chunks. Zoom/system + manual speaker flow: ~1 minute windows. */
+/** Mic: shorter chunks. Zoom/system uses the shared one-minute windows. */
 const SEGMENT_MS_MIC = 25_000;
-const SEGMENT_MS_SYSTEM = 60_000;
-
-const SYSTEM_AUDIO_HELP =
-  '画面共有ダイアログで「システム音声を共有」をオンにしてください。Zoom・LINE・その他アプリの通話ウィンドウ / タブ / 画面を共有できます。macOS で音声が取れない場合は BlackHole などの仮想オーディオでアプリ出力をマイクへルーティングし、「マイク」モードで録音してください。';
-
-type DisplayMediaOptionsWithSystemAudio = DisplayMediaStreamOptions & {
-  systemAudio?: 'include' | 'exclude';
-  windowAudio?: 'system' | 'window' | 'exclude';
-};
-
-function pickMimeType(): string {
-  return MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-    ? 'audio/webm;codecs=opus'
-    : 'audio/webm';
-}
 
 function formatTime(iso: string): string {
   try {
@@ -436,7 +428,7 @@ export default function Home() {
   }, [activeSpeakerId]);
 
   const segmentMs =
-    audioSource === 'system' ? SEGMENT_MS_SYSTEM : SEGMENT_MS_MIC;
+    audioSource === 'system' ? ZOOM_SEGMENT_MS : SEGMENT_MS_MIC;
 
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -807,48 +799,13 @@ export default function Home() {
     recorder.stop();
   }, []);
 
-  const openSelfMic = async (): Promise<MediaStream | null> => {
-    try {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      });
-    } catch (err) {
-      console.warn('self mic unavailable:', err);
-      return null;
-    }
-  };
-
   const acquireAudioStream = async (
     source: AudioSource
   ): Promise<MediaStream> => {
     if (source === 'mic') {
       return navigator.mediaDevices.getUserMedia({ audio: true });
     }
-
-    const options: DisplayMediaOptionsWithSystemAudio = {
-      video: true,
-      audio: true,
-      systemAudio: 'include',
-      windowAudio: 'system',
-    };
-    const displayStream = await navigator.mediaDevices.getDisplayMedia(options);
-    const audioTracks = displayStream.getAudioTracks();
-    // Whisper only needs audio; drop the video track to keep blobs small.
-    displayStream.getVideoTracks().forEach((track) => track.stop());
-
-    if (audioTracks.length === 0) {
-      displayStream.getTracks().forEach((track) => track.stop());
-      const err = new Error('NO_SYSTEM_AUDIO');
-      err.name = 'NoSystemAudioError';
-      throw err;
-    }
-
-    return new MediaStream(audioTracks);
+    return acquireSystemAudio();
   };
 
   const startRecording = async () => {
@@ -902,7 +859,7 @@ export default function Home() {
     }
 
     streamRef.current = stream;
-    mimeTypeRef.current = pickMimeType();
+    mimeTypeRef.current = pickRecorderMimeType();
     wantRecordingRef.current = true;
     rotateAfterStopRef.current = false;
 
@@ -937,7 +894,7 @@ export default function Home() {
     clearSegmentTimer();
     const ms =
       audioSourceRef.current === 'system'
-        ? SEGMENT_MS_SYSTEM
+        ? ZOOM_SEGMENT_MS
         : SEGMENT_MS_MIC;
     segmentTimerRef.current = setInterval(() => {
       rotateSegment();
