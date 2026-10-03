@@ -1585,23 +1585,6 @@ export default function Home() {
         </div>
       </header>
 
-      {(isRecording || isTranscribing) && (
-        <div className={styles.liveStrip} aria-live="polite">
-          {isRecording && (
-            <span className={styles.pillLive}>
-              <span className={styles.dotPulse} aria-hidden="true" />
-              Recording continues
-            </span>
-          )}
-          {isTranscribing && (
-            <span className={styles.pillQueue}>
-              <span className={styles.dotAmber} aria-hidden="true" />
-              Transcribing · {pendingCount}
-            </span>
-          )}
-        </div>
-      )}
-
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1712,29 +1695,6 @@ export default function Home() {
           </button>
         </div>
         <div className={styles.statusGenreRow}>
-          <div className={styles.statusCluster} aria-live="polite">
-            <span className={styles.dockLabel}>Status</span>
-            <div className={styles.statusPills}>
-              {isRecording && (
-                <span className={styles.pillLive}>
-                  <span className={styles.dotPulse} aria-hidden="true" />
-                  Recording
-                </span>
-              )}
-              {isTranscribing && (
-                <span className={styles.pillQueue}>
-                  <span className={styles.dotAmber} aria-hidden="true" />
-                  Transcribing · {pendingCount}
-                </span>
-              )}
-              {!isRecording && !isTranscribing && (
-                <span className={styles.pillIdle}>
-                  <span className={styles.dotIdle} aria-hidden="true" />
-                  Idle
-                </span>
-              )}
-            </div>
-          </div>
           <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
             文脈
           </label>
