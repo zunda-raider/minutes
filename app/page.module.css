@@ -444,6 +444,8 @@
 
 .entry {
   cursor: pointer;
+  /* Card chrome is for drag-select. Transcript opts back in so a text range works. */
+  user-select: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1rem;
@@ -486,9 +488,11 @@
   color: var(--muted);
   font-size: 0.95rem;
   line-height: 1;
-  padding: 0 0.15rem;
+  padding: 0 0.2rem;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
   cursor: pointer;
-  opacity: 0.4;
+  opacity: 0.45;
 }
 
 .entry:hover .entryDelete,
@@ -567,6 +571,8 @@
 .transcript,
 .transcriptJa {
   cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -1599,12 +1605,20 @@
   margin-top: 0.85rem;
 }
 
+.assignSlot {
+  min-height: 48px;
+  margin: 0 0 0.65rem;
+  display: flex;
+  align-items: center;
+}
+
 .assignBar {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
   gap: 0.35rem;
-  margin: 0 0 0.65rem;
+  margin: 0;
+  width: 100%;
   overflow-x: auto;
 }
 
@@ -1635,7 +1649,7 @@
 }
 
 .assignHint {
-  margin: 0 0 0.55rem;
+  margin: 0;
 }
 
 .assignClear {

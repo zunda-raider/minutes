@@ -178,6 +178,33 @@ function rangeIds(listIds: string[], anchor: string, current: string): string[] 
   return listIds.slice(lo, hi + 1);
 }
 
+/** Live DOM selection inside transcript cards. null when nothing is selected. */
+function readTextSelection(): { hits: string[]; spans: Map<string, TextSpan> } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  if (!entryIdFromNode(sel.anchorNode)) return null;
+  const range = sel.getRangeAt(0);
+  const hits: string[] = [];
+  const spans = new Map<string, TextSpan>();
+  document.querySelectorAll('[data-entry-id]').forEach((node) => {
+    try {
+      if (!range.intersectsNode(node)) return;
+    } catch {
+      return;
+    }
+    const id = node.getAttribute('data-entry-id');
+    if (!id) return;
+    hits.push(id);
+    const root = node.querySelector('[data-transcript]');
+    if (root instanceof HTMLElement) {
+      const span = textSpanIn(root, range);
+      if (span) spans.set(id, span);
+    }
+  });
+  if (hits.length === 0) return null;
+  return { hits, spans };
+}
+
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -211,8 +238,18 @@ export default function Home() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   /** Ids waiting for a second click to confirm delete. */
   const [armedDelete, setArmedDelete] = useState<string[] | null>(null);
+  /**
+   * cards: drag highlighted whole cards (entrySelected).
+   * text: DOM text selection — do not toggle entrySelected or the browser
+   * collapses the range mid-drag / on commit.
+   */
+  const [selectionKind, setSelectionKind] = useState<'cards' | 'text'>('cards');
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  const selectionKindRef = useRef(selectionKind);
+  selectionKindRef.current = selectionKind;
+  /** Card-drag pointerup must not also commit a text selection. */
+  const suppressTextCommitRef = useRef(false);
   const selectAnchorRef = useRef<string | null>(null);
   /** Partial transcript offsets captured while the text selection is still live. */
   const textSpansRef = useRef<Map<string, TextSpan>>(new Map());
@@ -1193,49 +1230,67 @@ export default function Home() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedIds(new Set());
+        setSelectionKind('cards');
         setArmedDelete(null);
         selectAnchorRef.current = null;
         textSpansRef.current = new Map();
+        window.getSelection()?.removeAllRanges();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const commitTextSelection = () => {
+    const read = readTextSelection();
+    if (!read) return;
+    textSpansRef.current = read.spans;
+    selectAnchorRef.current = read.hits[0] ?? null;
+    const next = new Set(read.hits);
+    selectedIdsRef.current = next;
+    selectionKindRef.current = 'text';
+    setSelectionKind('text');
+    setSelectedIds((prev) => {
+      if (prev.size === next.size && read.hits.every((id) => prev.has(id))) return prev;
+      return next;
+    });
+  };
+
   useEffect(() => {
+    // Refs only. setState here re-renders the card (entrySelected) and Chrome
+    // drops the text range before the user finishes dragging.
     const onSelectionChange = () => {
       if (dragSelectRef.current) return;
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-      if (!entryIdFromNode(sel.anchorNode)) return;
-      const range = sel.getRangeAt(0);
-      const hits: string[] = [];
-      const spans = new Map<string, TextSpan>();
-      document.querySelectorAll('[data-entry-id]').forEach((node) => {
-        try {
-          if (!range.intersectsNode(node)) return;
-        } catch {
-          return;
-        }
-        const id = node.getAttribute('data-entry-id');
-        if (!id) return;
-        hits.push(id);
-        const root = node.querySelector('[data-transcript]');
-        if (root instanceof HTMLElement) {
-          const span = textSpanIn(root, range);
-          if (span) spans.set(id, span);
-        }
-      });
-      if (hits.length === 0) return;
-      textSpansRef.current = spans;
-      selectAnchorRef.current = hits[0] ?? null;
-      setSelectedIds((prev) => {
-        if (prev.size === hits.length && hits.every((id) => prev.has(id))) return prev;
-        return new Set(hits);
-      });
+      const read = readTextSelection();
+      if (!read) return;
+      textSpansRef.current = read.spans;
+      selectAnchorRef.current = read.hits[0] ?? null;
+      selectedIdsRef.current = new Set(read.hits);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if (suppressTextCommitRef.current) {
+        suppressTextCommitRef.current = false;
+        return;
+      }
+      if (dragSelectRef.current) return;
+      commitTextSelection();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Shift') return;
+      if (dragSelectRef.current) return;
+      const target = e.target;
+      if (target instanceof Element && target.closest('input, textarea')) return;
+      commitTextSelection();
     };
     document.addEventListener('selectionchange', onSelectionChange);
-    return () => document.removeEventListener('selectionchange', onSelectionChange);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('keyup', onKeyUp);
+    };
   }, []);
 
   const entryIdAtPoint = (x: number, y: number, listIds: string[]) => {
@@ -1276,12 +1331,29 @@ export default function Home() {
     if (e.button !== 0) return;
     const target = e.target;
     if (!(target instanceof Element)) return;
-    if (target.closest('button, a, input, textarea, pre')) return;
+    if (target.closest('button, a, input, textarea')) return;
+    // Text inside the transcript must stay selectable. preventDefault on
+    // pointerdown (and entrySelected during the drag) cancels the range.
+    if (target.closest('[data-transcript], pre')) {
+      suppressTextCommitRef.current = false;
+      if (selectionKindRef.current !== 'text') {
+        selectionKindRef.current = 'text';
+        setSelectionKind('text');
+      }
+      if (selectedIdsRef.current.size > 0) {
+        selectedIdsRef.current = new Set();
+        setSelectedIds(new Set());
+      }
+      return;
+    }
     const id = entryIdFromNode(target);
     if (!id) return;
     e.preventDefault();
+    suppressTextCommitRef.current = true;
     textSpansRef.current = new Map();
     window.getSelection()?.removeAllRanges();
+    selectionKindRef.current = 'cards';
+    setSelectionKind('cards');
     const listIds = visibleIdsRef.current;
     const additive = e.metaKey || e.ctrlKey;
     const base = additive ? new Set(selectedIdsRef.current) : new Set<string>();
@@ -1362,6 +1434,7 @@ export default function Home() {
       })
     );
     setSelectedIds(new Set());
+    setSelectionKind('cards');
     setArmedDelete(null);
     selectAnchorRef.current = null;
     textSpansRef.current = new Map();
@@ -1372,7 +1445,7 @@ export default function Home() {
     const isSelf = entry.speakerId === 1;
     const isOther = entry.speakerId != null && entry.speakerId !== 1;
     const speakerTag = quietSpeakerTag(entry.speakerId, entry.source);
-    const selected = selectedIds.has(entry.id);
+    const selected = selectionKind === 'cards' && selectedIds.has(entry.id);
     const tone = isSelf
       ? `${styles.entry} ${styles.entrySelf}`
       : isOther
@@ -1453,9 +1526,11 @@ export default function Home() {
           className={styles.assignClear}
           onClick={() => {
             setSelectedIds(new Set());
+            setSelectionKind('cards');
             setArmedDelete(null);
             selectAnchorRef.current = null;
             textSpansRef.current = new Map();
+            window.getSelection()?.removeAllRanges();
           }}
         >
           解除
@@ -1468,13 +1543,15 @@ export default function Home() {
     visibleIdsRef.current = list.map((entry) => entry.id);
     return (
       <>
-        {selectedIds.size === 0 ? (
-          <p className={styles.assignHint}>
-            カードをドラッグ、または文字を選択して 自分 / セミナー / それ以外。文字の一部だけ選ぶと、その部分だけ別カードになります
-          </p>
-        ) : (
-          renderAssignBar()
-        )}
+        <div className={styles.assignSlot}>
+          {selectedIds.size === 0 ? (
+            <p className={styles.assignHint}>
+              カードをドラッグ、または文字を選択して 自分 / セミナー / それ以外。文字の一部だけ選ぶと、その部分だけ別カードになります
+            </p>
+          ) : (
+            renderAssignBar()
+          )}
+        </div>
         <ul
           className={styles.entryList}
           onPointerDown={onListPointerDown}
