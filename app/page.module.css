@@ -259,78 +259,6 @@
   }
 }
 
-.statusPills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.pillLive,
-.pillQueue,
-.pillIdle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-height: 32px;
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.pillLive {
-  color: #fecaca;
-  border-color: rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.12);
-}
-
-.pillQueue {
-  color: #fde68a;
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.1);
-}
-
-.pillIdle {
-  color: var(--muted);
-}
-
-.dotPulse,
-.dotAmber,
-.dotIdle {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.dotPulse {
-  background: var(--danger);
-  box-shadow: 0 0 0 0 rgba(255, 92, 122, 0.6);
-  animation: dotBeat 1.2s ease-out infinite;
-}
-
-.dotAmber {
-  background: var(--warn);
-}
-
-.dotIdle {
-  background: #64748b;
-}
-
-@keyframes dotBeat {
-  0% {
-    box-shadow: 0 0 0 0 rgba(255, 92, 122, 0.55);
-  }
-  70% {
-    box-shadow: 0 0 0 8px rgba(255, 92, 122, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(255, 92, 122, 0);
-  }
-}
-
 .error {
   margin: 0.85rem 0 0;
   padding: 0.75rem 0.9rem;
@@ -686,8 +614,7 @@
     order: -1;
   }
 
-  .langToggle,
-  .statusPills {
+  .langToggle {
     width: 100%;
   }
 
@@ -766,13 +693,6 @@
 
 .noteHeading {
   flex: 1 1 12rem;
-}
-
-.liveStrip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin-bottom: 1rem;
 }
 
 .homePreview {
@@ -1618,7 +1538,7 @@
   font-weight: 700;
 }
 
-/* Status + compact genre: one row under copy/download/clear (not above). */
+/* Compact genre/context beside the Note buttons. */
 .statusGenreRow {
   display: flex;
   flex-wrap: nowrap;
@@ -1627,20 +1547,6 @@
   margin-top: 0.4rem;
   min-width: 0;
   width: 100%;
-}
-
-.statusCluster {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 0.4rem;
-  flex: 0 0 auto;
-  min-width: 0;
-}
-
-.statusGenreRow .statusPills {
-  flex-wrap: nowrap;
-  width: auto;
 }
 
 .genreInlineLabel {
@@ -1653,7 +1559,7 @@
   color: var(--muted);
 }
 
-/* Compact genre/context: shares the status row, never wraps to a second line. */
+/* Compact genre/context: stays on the Note row, never wraps to a second line. */
 .genreInputCompact {
   flex: 1 1 auto;
   min-width: 0;
@@ -1770,8 +1676,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recordButtonActive,
-  .dotPulse {
+  .recordButtonActive {
     animation: none;
   }
 }
