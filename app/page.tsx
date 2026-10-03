@@ -1654,45 +1654,6 @@ export default function Home() {
           </>
         )}
 
-        <div className={styles.statusGenreRow}>
-          <div className={styles.statusCluster} aria-live="polite">
-            <span className={styles.dockLabel}>Status</span>
-            <div className={styles.statusPills}>
-              {isRecording && (
-                <span className={styles.pillLive}>
-                  <span className={styles.dotPulse} aria-hidden="true" />
-                  Recording
-                </span>
-              )}
-              {isTranscribing && (
-                <span className={styles.pillQueue}>
-                  <span className={styles.dotAmber} aria-hidden="true" />
-                  Transcribing · {pendingCount}
-                </span>
-              )}
-              {!isRecording && !isTranscribing && (
-                <span className={styles.pillIdle}>
-                  <span className={styles.dotIdle} aria-hidden="true" />
-                  Idle
-                </span>
-              )}
-            </div>
-          </div>
-          <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
-            文脈
-          </label>
-          <input
-            id="meeting-genre-dock"
-            className={styles.genreInputCompact}
-            type="text"
-            value={genre}
-            onChange={(e) => setGenre(e.target.value)}
-            placeholder="ジャンル / 文脈"
-            aria-label="ジャンル / 文脈"
-            autoComplete="off"
-          />
-        </div>
-
         {error && (
           <p className={styles.error} role="alert">
             {error}
@@ -1705,6 +1666,44 @@ export default function Home() {
       <section className={styles.feed}>
         <div className={styles.feedToolbar}>
           {renderFeedActions()}
+          <div className={styles.statusGenreRow}>
+            <div className={styles.statusCluster} aria-live="polite">
+              <span className={styles.dockLabel}>Status</span>
+              <div className={styles.statusPills}>
+                {isRecording && (
+                  <span className={styles.pillLive}>
+                    <span className={styles.dotPulse} aria-hidden="true" />
+                    Recording
+                  </span>
+                )}
+                {isTranscribing && (
+                  <span className={styles.pillQueue}>
+                    <span className={styles.dotAmber} aria-hidden="true" />
+                    Transcribing · {pendingCount}
+                  </span>
+                )}
+                {!isRecording && !isTranscribing && (
+                  <span className={styles.pillIdle}>
+                    <span className={styles.dotIdle} aria-hidden="true" />
+                    Idle
+                  </span>
+                )}
+              </div>
+            </div>
+            <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
+              文脈
+            </label>
+            <input
+              id="meeting-genre-dock"
+              className={styles.genreInputCompact}
+              type="text"
+              value={genre}
+              onChange={(e) => setGenre(e.target.value)}
+              placeholder="ジャンル / 文脈"
+              aria-label="ジャンル / 文脈"
+              autoComplete="off"
+            />
+          </div>
         </div>
 
         {entries.length === 0 ? (
