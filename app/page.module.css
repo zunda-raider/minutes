@@ -543,11 +543,37 @@
 
 .entryMetaMinimal {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.65rem;
   margin-bottom: 0.45rem;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.entryDelete {
+  margin-left: auto;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+  opacity: 0.4;
+}
+
+.entry:hover .entryDelete,
+.entryDelete:focus-visible {
+  opacity: 0.85;
+}
+
+.entryDeleteArmed {
+  opacity: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
 }
 
 .entryMetaLead {
@@ -1621,10 +1647,29 @@
 
 .assignBar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.35rem;
   margin: 0 0 0.65rem;
+  overflow-x: auto;
+}
+
+.assignDelete {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 0.45rem;
+  min-height: 32px;
+  border-radius: 999px;
+}
+
+.assignDeleteArmed {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
 }
 
 .assignCount,
