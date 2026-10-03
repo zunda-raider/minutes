@@ -175,7 +175,33 @@
   height: auto;
   display: block;
   border-radius: 14px;
-  background: #071824;
+  background: #082f49;
+  font-family: inherit;
+}
+
+.waveDrift {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  animation: gdWaveSlide 18s linear infinite;
+}
+
+.waveFill {
+  fill: rgba(186, 230, 253, 0.22);
+}
+
+.waveFillDeep {
+  fill: rgba(224, 242, 254, 0.16);
+}
+
+@keyframes gdWaveSlide {
+  from { transform: translateX(0); }
+  to { transform: translateX(-33.333%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waveDrift {
+    animation: none;
+  }
 }
 
 .legend {
