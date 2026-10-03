@@ -69,7 +69,7 @@ type TranscriptEntry = {
 };
 
 
-type Screen = 'home' | 'note1' | 'note2';
+type Screen = 'home' | 'note1' | 'note2' | 'gd';
 type AudioSource = 'mic' | 'system';
 
 /** Mic: shorter chunks. Zoom/system + manual speaker flow: ~1 minute windows. */
@@ -230,8 +230,6 @@ export default function Home() {
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
-  /** Stub flag for future GD (group discussion) mode UI/flow. */
-  const [gdMode, setGdMode] = useState(false);
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
@@ -1737,6 +1735,46 @@ export default function Home() {
     );
   }
 
+  if (screen === 'gd') {
+    return (
+      <div className={styles.app}>
+        <div className={styles.bgGlow} aria-hidden="true" />
+
+        <header className={styles.noteTopBar}>
+          <button
+            type="button"
+            className={styles.backButton}
+            onClick={() => setScreen('home')}
+          >
+            <span className={styles.backChevron} aria-hidden="true" />
+            Home
+          </button>
+          <div className={styles.noteHeading}>
+            <h1 className={styles.title}>GD議事録</h1>
+            <p className={styles.subtitle}>グループディスカッション</p>
+          </div>
+        </header>
+
+        <section className={styles.feed}>
+          <div className={styles.emptyState}>
+            <div className={styles.emptyOrb} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>準備中</h3>
+            <p className={styles.emptyBody}>
+              GD専用の画面です。中身はこれから作ります。
+            </p>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={() => setScreen('home')}
+            >
+              Home に戻る
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   // Home = PR #6 polished control UI + compact Note entry points
   return (
     <div className={`${styles.app} ${styles.homeScreen}`}>
@@ -2028,10 +2066,9 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                className={gdMode ? styles.langButtonActive : styles.langButton}
-                aria-pressed={gdMode}
+                className={styles.langButton}
                 aria-label="GDモード"
-                onClick={() => setGdMode((on) => !on)}
+                onClick={() => setScreen('gd')}
               >
                 GDモード
               </button>
@@ -2047,7 +2084,7 @@ export default function Home() {
               )}
             </div>
 
-            {speakerMode === 'manual' && !gdMode && (
+            {speakerMode === 'manual' && (
               <div className={styles.activeSpeakerBar}>
                 <span className={styles.dockLabel}>
                   {isRecording ? 'いま話す人' : '次の話者'}
