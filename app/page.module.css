@@ -481,7 +481,7 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
-/* Speaker A / 自分 vs everyone else — readable without reading the label */
+/* Speaker A / 自分 vs everyone else — color only, no text label on the card */
 .entrySelf {
   border-color: rgba(52, 211, 153, 0.5);
   background: linear-gradient(180deg, rgba(52, 211, 153, 0.16), rgba(52, 211, 153, 0.05));
@@ -492,29 +492,6 @@
   border-color: rgba(148, 163, 184, 0.22);
   background: linear-gradient(180deg, rgba(100, 116, 139, 0.1), rgba(0, 0, 0, 0.08));
   box-shadow: inset 5px 0 0 #64748b, 0 10px 30px rgba(0, 0, 0, 0.2);
-}
-
-.speakerTagSelf,
-.speakerTagOther {
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.2;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-.speakerTagSelf {
-  color: #d1fae5;
-  background: rgba(52, 211, 153, 0.22);
-  border: 1px solid rgba(52, 211, 153, 0.55);
-}
-
-.speakerTagOther {
-  color: #e2e8f0;
-  background: rgba(148, 163, 184, 0.12);
-  border: 1px solid rgba(148, 163, 184, 0.32);
-  font-weight: 600;
 }
 
 .entryMetaMinimal {
