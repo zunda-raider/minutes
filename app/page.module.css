@@ -1477,6 +1477,66 @@
   font-weight: 700;
 }
 
+.statusGenreRow {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  min-width: 0;
+}
+
+.statusCluster {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.statusGenreRow .statusPills {
+  flex-wrap: nowrap;
+  width: auto;
+}
+
+.genreInlineLabel {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Compact genre/context: shares the status row, never wraps to a second line. */
+.genreInputCompact {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.genreInputCompact::placeholder {
+  color: #64748b;
+}
+
+.genreInputCompact:focus {
+  outline: 2px solid #5b8cff;
+  outline-offset: 1px;
+}
+
 .speakerModeBar {
   display: flex;
   flex-wrap: wrap;
