@@ -123,7 +123,7 @@ npm run dev
 
 ## ジャンル / 文脈
 
-Home の「ジャンル / 文脈」はメニュー内と、話者ボタンの下（Status と同じ1行の小さい入力）の両方にあります。同じ値で、localStorage に保存されます。空欄なら従来どおり。入力があると `/api/translate` と `/api/summarize` のプロンプトに渡し、用語・要約の精度を上げます。
+Home の「ジャンル / 文脈」はメニュー内と、コピー／ダウンロード／Clear 行の下（Status と同じ1行の小さい入力）の両方にあります。同じ値で、localStorage に保存されます。空欄なら従来どおり。入力があると `/api/translate` と `/api/summarize` のプロンプトに渡し、用語・要約の精度を上げます。
 
 
 ## 話者分け（diarization）

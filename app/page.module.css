@@ -1051,9 +1051,21 @@
 
 .feedToolbar {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
   margin-bottom: 0.85rem;
   min-width: 0;
+}
+
+.feedToolbar .copyActionRow {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.feedToolbar .statusGenreRow {
+  margin-top: 0;
+  width: 100%;
 }
 
 .summaryBody {
@@ -1530,6 +1542,7 @@
   font-weight: 700;
 }
 
+/* Status + compact genre: one row under copy/download/clear (not above). */
 .statusGenreRow {
   display: flex;
   flex-wrap: nowrap;
@@ -1537,6 +1550,7 @@
   gap: 0.45rem;
   margin-top: 0.4rem;
   min-width: 0;
+  width: 100%;
 }
 
 .statusCluster {
