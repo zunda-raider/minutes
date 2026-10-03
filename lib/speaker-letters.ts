@@ -42,12 +42,16 @@ export function zoomCategoryForSpeaker(
   return null;
 }
 
-/** Letter-button caption. A/B have a role; C–G are extra others. */
+/**
+ * Letter-button caption.
+ * A 自分, B セミナー, C その他. D–G are bare letters (no role in parentheses).
+ */
 export function zoomLetterButtonLabel(speakerId: number): string {
   const letter = letterForSpeakerId(speakerId);
   if (speakerId === 1) return `発言者${letter}（自分）`;
   if (speakerId === 2) return `発言者${letter}（セミナー）`;
-  return `発言者${letter}（その他発言者）`;
+  if (speakerId === 3) return `発言者${letter}（その他）`;
+  return `発言者${letter}`;
 }
 
 /**
