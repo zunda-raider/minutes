@@ -2138,12 +2138,9 @@ export default function Home() {
                 Zoom・LINE・他
               </button>
             </div>
-            {audioSource === 'system' && (
-              <p className={styles.genreHint}>
-                Zoomモードはマイクの音量で「自分」を付けます（文字起こしは共有音声のまま）。
-                {selfMicNote ? ` ${selfMicNote}` : ''}
-              </p>
-            )}
+            {audioSource === 'system' && selfMicNote ? (
+              <p className={styles.genreHint}>{selfMicNote}</p>
+            ) : null}
           </div>
 
           <div className={styles.dockGroup}>
