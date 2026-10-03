@@ -2047,11 +2047,7 @@ export default function Home() {
               )}
             </div>
 
-            {speakerMode === 'manual' && (
-              <details className={styles.optionalSpeaker}>
-                <summary className={styles.optionalSpeakerSummary}>
-                  録音中に話者を切り替える（任意）
-                </summary>
+            {speakerMode === 'manual' && !gdMode && (
               <div className={styles.activeSpeakerBar}>
                 <span className={styles.dockLabel}>
                   {isRecording ? 'いま話す人' : '次の話者'}
@@ -2101,7 +2097,6 @@ export default function Home() {
                   </div>
                 </div>
               </div>
-              </details>
             )}
           </>
         )}
