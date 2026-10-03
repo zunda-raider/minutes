@@ -52,6 +52,7 @@ import {
   triggerBlobDownload,
 } from '@/lib/audio-storage';
 import { buildStoreZip } from '@/lib/zip-store';
+import { GdScreen } from './gd-screen';
 
 type LangOption = { code: string; label: string };
 
@@ -1737,41 +1738,12 @@ export default function Home() {
 
   if (screen === 'gd') {
     return (
-      <div className={styles.app}>
-        <div className={styles.bgGlow} aria-hidden="true" />
-
-        <header className={styles.noteTopBar}>
-          <button
-            type="button"
-            className={styles.backButton}
-            onClick={() => setScreen('home')}
-          >
-            <span className={styles.backChevron} aria-hidden="true" />
-            Home
-          </button>
-          <div className={styles.noteHeading}>
-            <h1 className={styles.title}>GD議事録</h1>
-            <p className={styles.subtitle}>グループディスカッション</p>
-          </div>
-        </header>
-
-        <section className={styles.feed}>
-          <div className={styles.emptyState}>
-            <div className={styles.emptyOrb} aria-hidden="true" />
-            <h3 className={styles.emptyTitle}>準備中</h3>
-            <p className={styles.emptyBody}>
-              GD専用の画面です。中身はこれから作ります。
-            </p>
-            <button
-              type="button"
-              className={styles.recordButton}
-              onClick={() => setScreen('home')}
-            >
-              Home に戻る
-            </button>
-          </div>
-        </section>
-      </div>
+      <GdScreen
+        entries={entries}
+        genre={genre}
+        historyReady={historyReady}
+        onBack={() => setScreen('home')}
+      />
     );
   }
 
