@@ -481,7 +481,7 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
-/* Speaker A / 自分 vs everyone else — color only, no text label on the card */
+/* Speaker A / 自分 vs everyone else — green vs gray cards */
 .entrySelf {
   border-color: rgba(52, 211, 153, 0.5);
   background: linear-gradient(180deg, rgba(52, 211, 153, 0.16), rgba(52, 211, 153, 0.05));
@@ -499,6 +499,44 @@
   align-items: baseline;
   gap: 0.65rem;
   margin-bottom: 0.45rem;
+}
+
+.entryMetaLead {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* Quiet speaker word beside #N — same meta size, not a chip */
+.entrySpeakerQuiet {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.noteGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.35rem;
+}
+
+.noteGroup {
+  min-width: 0;
+}
+
+.noteGroupTitle {
+  margin: 0 0 0.55rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.noteGroupEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .entryMeta {

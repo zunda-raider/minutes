@@ -18,3 +18,28 @@ export function nextSpeakerId(current: number | undefined | null): number {
 export function defaultSpeakerLabel(speakerId: number): string {
   return letterForSpeakerId(speakerId);
 }
+
+export type RecordingSource = 'mic' | 'system';
+
+/**
+ * Quiet card-meta label. null means omit the word (unset / unknown speaker).
+ * Zoom A and mic メイン (id 1) are both treated as self → 自分.
+ * Mic 質問者 only when the segment was recorded in mic mode.
+ * Zoom B–G are the letter only.
+ */
+export function quietSpeakerTag(
+  speakerId: number | undefined | null,
+  source?: RecordingSource | null
+): string | null {
+  if (speakerId == null || !Number.isFinite(speakerId) || speakerId < 1) {
+    return null;
+  }
+  if (source === 'mic') {
+    if (speakerId === 1) return '自分';
+    if (speakerId === 2) return '質問者';
+    return null;
+  }
+  if (speakerId === 1) return '自分';
+  if (speakerId > MAX_SPEAKERS) return null;
+  return letterForSpeakerId(speakerId);
+}
