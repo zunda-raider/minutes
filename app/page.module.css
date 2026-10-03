@@ -1434,19 +1434,24 @@
   white-space: nowrap;
 }
 
-/* Live picker: セミナー / 自分 / それ以外 dominate 発言者A–G */
-.speakerPicker .categorySelf,
-.speakerPicker .categorySelfActive,
-.speakerPicker .categorySeminar,
-.speakerPicker .categorySeminarActive,
-.speakerPicker .categoryOther,
-.speakerPicker .categoryOtherActive {
-  font-size: 1.2rem;
+/* Live picker: セミナー / 自分 / それ以外 stay much larger than 発言者A–G.
+   (0, 3, 0) beats the compact one-row sizes on .category* (0, 1, 0):
+   font-size 0.72rem, min-height 32px, padding 0.18rem 0.42rem, min-width 0.
+   Nothing later in this file resets these size properties. */
+.activeSpeakerBar .speakerPicker .categorySelf,
+.activeSpeakerBar .speakerPicker .categorySelfActive,
+.activeSpeakerBar .speakerPicker .categorySeminar,
+.activeSpeakerBar .speakerPicker .categorySeminarActive,
+.activeSpeakerBar .speakerPicker .categoryOther,
+.activeSpeakerBar .speakerPicker .categoryOtherActive {
+  font-size: 1.7rem;
   font-weight: 800;
   line-height: 1.15;
-  min-height: 58px;
-  padding: 0.55rem 1.05rem;
-  border-radius: 14px;
+  min-height: 84px;
+  min-width: max-content;
+  flex: 0 0 auto;
+  padding: 1rem 1.6rem;
+  border-radius: 16px;
   border-width: 2px;
 }
 
