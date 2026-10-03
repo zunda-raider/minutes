@@ -32,6 +32,7 @@ import {
   zoomLetterButtonLabel,
   type ZoomCategoryId,
 } from '@/lib/speaker-letters';
+import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -130,6 +131,44 @@ function entryIdFromNode(node: EventTarget | Node | null): string | null {
   return li?.getAttribute('data-entry-id') ?? null;
 }
 
+function formatNote(note: number): string {
+  if (!Number.isFinite(note)) return '?';
+  if (Math.abs(note - Math.round(note)) < 1e-6) return String(Math.round(note));
+  return note.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/** Offsets of a DOM range inside a transcript node. null if the range misses it. */
+function textSpanIn(root: HTMLElement, range: Range): TextSpan | null {
+  if (!root.textContent) return null;
+  let hits = false;
+  try {
+    hits = range.intersectsNode(root);
+  } catch {
+    return null;
+  }
+  if (!hits) return null;
+  const content = document.createRange();
+  content.selectNodeContents(root);
+  const startRange = document.createRange();
+  startRange.setStart(content.startContainer, content.startOffset);
+  if (range.compareBoundaryPoints(Range.START_TO_START, content) <= 0) {
+    startRange.setEnd(content.startContainer, content.startOffset);
+  } else {
+    startRange.setEnd(range.startContainer, range.startOffset);
+  }
+  const endRange = document.createRange();
+  endRange.setStart(content.startContainer, content.startOffset);
+  if (range.compareBoundaryPoints(Range.END_TO_END, content) >= 0) {
+    endRange.setEnd(content.endContainer, content.endOffset);
+  } else {
+    endRange.setEnd(range.endContainer, range.endOffset);
+  }
+  const start = startRange.toString().length;
+  const end = endRange.toString().length;
+  if (end <= start) return null;
+  return { start, end };
+}
+
 function rangeIds(listIds: string[], anchor: string, current: string): string[] {
   const ia = listIds.indexOf(anchor);
   const ib = listIds.indexOf(current);
@@ -175,6 +214,8 @@ export default function Home() {
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
   const selectAnchorRef = useRef<string | null>(null);
+  /** Partial transcript offsets captured while the text selection is still live. */
+  const textSpansRef = useRef<Map<string, TextSpan>>(new Map());
   const visibleIdsRef = useRef<string[]>([]);
   const dragSelectRef = useRef<{
     pointerId: number;
@@ -271,7 +312,9 @@ export default function Home() {
   // Persist on every change after hydrate (including clear → [])
   useEffect(() => {
     const maxNote = entries.reduce((max, entry) => Math.max(max, entry.note), 0);
-    if (maxNote > entriesLenRef.current) entriesLenRef.current = maxNote;
+    // Ceil so a split fragment (2.5) does not make the next recording note fractional.
+    const ceiling = Math.ceil(maxNote - 1e-9);
+    if (ceiling > entriesLenRef.current) entriesLenRef.current = ceiling;
   }, [entries]);
 
   useEffect(() => {
@@ -875,6 +918,7 @@ export default function Home() {
     setSelectedIds(new Set());
     setArmedDelete(null);
     selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
     lastSpeakerRef.current = null;
     pitchCentroidsRef.current = [];
     clearStoredEntries();
@@ -1151,6 +1195,7 @@ export default function Home() {
         setSelectedIds(new Set());
         setArmedDelete(null);
         selectAnchorRef.current = null;
+        textSpansRef.current = new Map();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -1165,6 +1210,7 @@ export default function Home() {
       if (!entryIdFromNode(sel.anchorNode)) return;
       const range = sel.getRangeAt(0);
       const hits: string[] = [];
+      const spans = new Map<string, TextSpan>();
       document.querySelectorAll('[data-entry-id]').forEach((node) => {
         try {
           if (!range.intersectsNode(node)) return;
@@ -1172,9 +1218,16 @@ export default function Home() {
           return;
         }
         const id = node.getAttribute('data-entry-id');
-        if (id) hits.push(id);
+        if (!id) return;
+        hits.push(id);
+        const root = node.querySelector('[data-transcript]');
+        if (root instanceof HTMLElement) {
+          const span = textSpanIn(root, range);
+          if (span) spans.set(id, span);
+        }
       });
       if (hits.length === 0) return;
+      textSpansRef.current = spans;
       selectAnchorRef.current = hits[0] ?? null;
       setSelectedIds((prev) => {
         if (prev.size === hits.length && hits.every((id) => prev.has(id))) return prev;
@@ -1227,6 +1280,7 @@ export default function Home() {
     const id = entryIdFromNode(target);
     if (!id) return;
     e.preventDefault();
+    textSpansRef.current = new Map();
     window.getSelection()?.removeAllRanges();
     const listIds = visibleIdsRef.current;
     const additive = e.metaKey || e.ctrlKey;
@@ -1299,13 +1353,19 @@ export default function Home() {
   const assignSelectedBucket = (speakerId: number) => {
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
+    const spans = textSpansRef.current;
+    let seq = 0;
     setEntries((prev) =>
-      prev.map((entry) =>
-        ids.has(entry.id)
-          ? { ...entry, speakerId, source: 'system' as const }
-          : entry
-      )
+      applySpeakerSplit(prev, ids, spans, speakerId, () => {
+        seq += 1;
+        return `${Date.now()}-${seq}-${Math.random().toString(36).slice(2, 8)}`;
+      })
     );
+    setSelectedIds(new Set());
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    window.getSelection()?.removeAllRanges();
   };
 
   const renderEntryCard = (entry: TranscriptEntry) => {
@@ -1326,7 +1386,7 @@ export default function Home() {
       >
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryMetaLead}>
-            <span className={styles.entryIndex}>#{entry.note}</span>
+            <span className={styles.entryIndex}>#{formatNote(entry.note)}</span>
             {speakerTag && (
               <span className={styles.entrySpeakerQuiet}>{speakerTag}</span>
             )}
@@ -1351,7 +1411,7 @@ export default function Home() {
             {armedDelete?.length === 1 && armedDelete[0] === entry.id ? '削除' : '×'}
           </button>
         </div>
-        <pre className={styles.transcript}>{entry.text}</pre>
+        <pre className={styles.transcript} data-transcript="">{entry.text}</pre>
         {entry.textJa && (
           <div className={styles.translationBlock}>
             <div className={styles.translationLabel}>日本語訳（ローカル）</div>
@@ -1395,6 +1455,7 @@ export default function Home() {
             setSelectedIds(new Set());
             setArmedDelete(null);
             selectAnchorRef.current = null;
+            textSpansRef.current = new Map();
           }}
         >
           解除
@@ -1409,7 +1470,7 @@ export default function Home() {
       <>
         {selectedIds.size === 0 ? (
           <p className={styles.assignHint}>
-            カードをドラッグ、または文字を選択してから 自分 / セミナー / それ以外
+            カードをドラッグ、または文字を選択して 自分 / セミナー / それ以外。文字の一部だけ選ぶと、その部分だけ別カードになります
           </p>
         ) : (
           renderAssignBar()
@@ -1649,6 +1710,44 @@ export default function Home() {
           >
             Note 2 · 新しい順
           </button>
+        </div>
+        <div className={styles.statusGenreRow}>
+          <div className={styles.statusCluster} aria-live="polite">
+            <span className={styles.dockLabel}>Status</span>
+            <div className={styles.statusPills}>
+              {isRecording && (
+                <span className={styles.pillLive}>
+                  <span className={styles.dotPulse} aria-hidden="true" />
+                  Recording
+                </span>
+              )}
+              {isTranscribing && (
+                <span className={styles.pillQueue}>
+                  <span className={styles.dotAmber} aria-hidden="true" />
+                  Transcribing · {pendingCount}
+                </span>
+              )}
+              {!isRecording && !isTranscribing && (
+                <span className={styles.pillIdle}>
+                  <span className={styles.dotIdle} aria-hidden="true" />
+                  Idle
+                </span>
+              )}
+            </div>
+          </div>
+          <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
+            文脈
+          </label>
+          <input
+            id="meeting-genre-dock"
+            className={styles.genreInputCompact}
+            type="text"
+            value={genre}
+            onChange={(e) => setGenre(e.target.value)}
+            placeholder="ジャンル / 文脈"
+            aria-label="ジャンル / 文脈"
+            autoComplete="off"
+          />
         </div>
       </div>
 
@@ -1958,44 +2057,6 @@ export default function Home() {
       <section className={styles.feed}>
         <div className={styles.feedToolbar}>
           {renderFeedActions()}
-          <div className={styles.statusGenreRow}>
-            <div className={styles.statusCluster} aria-live="polite">
-              <span className={styles.dockLabel}>Status</span>
-              <div className={styles.statusPills}>
-                {isRecording && (
-                  <span className={styles.pillLive}>
-                    <span className={styles.dotPulse} aria-hidden="true" />
-                    Recording
-                  </span>
-                )}
-                {isTranscribing && (
-                  <span className={styles.pillQueue}>
-                    <span className={styles.dotAmber} aria-hidden="true" />
-                    Transcribing · {pendingCount}
-                  </span>
-                )}
-                {!isRecording && !isTranscribing && (
-                  <span className={styles.pillIdle}>
-                    <span className={styles.dotIdle} aria-hidden="true" />
-                    Idle
-                  </span>
-                )}
-              </div>
-            </div>
-            <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
-              文脈
-            </label>
-            <input
-              id="meeting-genre-dock"
-              className={styles.genreInputCompact}
-              type="text"
-              value={genre}
-              onChange={(e) => setGenre(e.target.value)}
-              placeholder="ジャンル / 文脈"
-              aria-label="ジャンル / 文脈"
-              autoComplete="off"
-            />
-          </div>
         </div>
 
         {entries.length === 0 ? (
