@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import gd from './gd.module.css';
+import { GdLive } from './gd-live';
 import {
   coerceGdAnalysis,
   formatGdNote,
@@ -597,6 +598,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   const [result, setResult] = useState<GdAnalysis | null>(null);
   const [snapshot, setSnapshot] = useState<GdHistoryEntry[]>([]);
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
+  const [deck, setDeck] = useState<'live' | 'harbor'>('live');
 
   const sessions = useMemo(() => groupSessions(ordered), [ordered]);
   const activeSession =
@@ -849,6 +851,10 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
     );
   }
 
+  if (deck === 'live') {
+    return <GdLive onBack={onBack} onHarbor={() => setDeck('harbor')} />;
+  }
+
   return (
     <div className={`${styles.app} ${styles.appGd} ${gd.lobbyShell}`}>
       <header className={gd.lobbyBar}>
@@ -863,6 +869,9 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             港で航海ログを選び、積み荷カードを積んでから出航します。分析と航海図・木は、出航のあとです。
           </p>
         </div>
+        <button type="button" className={gd.liveJump} onClick={() => setDeck('live')}>
+          ライブ
+        </button>
       </header>
 
       <section className={gd.lobby} aria-label="出航ロビー">
@@ -875,7 +884,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             : '航海ログを探しています…'}
         </p>
         <p className={gd.lobbyNote}>
-          ライブのGD終了から自動で出航する動線は準備中です。このブラウザに保存された記録から選べます。
+          ライブの議論は別画面です。終了から自動でこの港へ進む動線は、まだ繋いでいません。
         </p>
 
         {historyReady && ordered.length === 0 ? (

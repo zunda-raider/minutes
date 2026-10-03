@@ -656,3 +656,23 @@
     animation: none;
   }
 }
+
+.liveJump {
+  margin-left: auto;
+  flex: none;
+  appearance: none;
+  border: 1px solid rgba(253, 230, 138, 0.55);
+  background: rgba(253, 230, 138, 0.12);
+  color: #fde68a;
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0.35rem 0.9rem;
+  font: inherit;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.liveJump:hover {
+  background: rgba(253, 230, 138, 0.22);
+}
