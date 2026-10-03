@@ -515,6 +515,7 @@
 }
 
 .entry {
+  cursor: pointer;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1rem;
@@ -533,6 +534,11 @@
   border-color: rgba(148, 163, 184, 0.22);
   background: linear-gradient(180deg, rgba(100, 116, 139, 0.1), rgba(0, 0, 0, 0.08));
   box-shadow: inset 5px 0 0 #64748b, 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.entrySelected {
+  outline: 2px solid rgba(167, 139, 250, 0.95);
+  outline-offset: 2px;
 }
 
 .entryMetaMinimal {
@@ -606,6 +612,7 @@
 
 .transcript,
 .transcriptJa {
+  cursor: text;
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -1610,6 +1617,54 @@
   align-items: center;
   gap: 0.55rem 0.75rem;
   margin-top: 0.85rem;
+}
+
+.assignBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.65rem;
+}
+
+.assignCount,
+.assignHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.assignHint {
+  margin: 0 0 0.55rem;
+}
+
+.assignClear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 0.2rem;
+  min-height: 32px;
+}
+
+.optionalSpeaker {
+  margin-top: 0.45rem;
+}
+
+.optionalSpeakerSummary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.optionalSpeaker[open] .optionalSpeakerSummary {
+  margin-bottom: 0.35rem;
 }
 
 .diarizeHint {
