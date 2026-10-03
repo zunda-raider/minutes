@@ -9,6 +9,7 @@ import {
   parseDiarizedTranscript,
   stripTimestamps,
 } from '@/lib/whisper-diarize';
+import { parseWhisperSegments } from '@/lib/diarize-parse';
 
 export const runtime = 'nodejs';
 
@@ -156,6 +157,7 @@ export async function POST(req: Request) {
       text: plainText,
       lang: whisperLang,
       turns: parsed.turns,
+      segments: parseWhisperSegments(stdout),
       hasDiarizeMarks: parsed.hasDiarizeMarks,
       diarize: {
         requested: diarize.enabled,
