@@ -15,7 +15,9 @@ import {
   saveSpeakerLabels,
   saveSpeakerMode,
   saveSummary,
+  loadLastCopyAt,
   loadSpeakerMode,
+  saveLastCopyAt,
   type SpeakerLabels,
   type SpeakerMode,
 } from '@/lib/history-storage';
@@ -102,12 +104,26 @@ function isEnglishEntry(entry: TranscriptEntry): boolean {
   return entry.lang === 'en' || entry.lang.startsWith('en-');
 }
 
+/** Zoom speaker B. Mic id 2 is 質問者, not セミナー. */
+function isSeminarUtterance(entry: TranscriptEntry): boolean {
+  return entry.speakerId === 2 && entry.source !== 'mic';
+}
+
+/** Speaker A (自分) plus C–G. Excludes B (セミナー / 質問者) and unlabeled. */
+function isSelfOrOtherUtterance(entry: TranscriptEntry): boolean {
+  const id = entry.speakerId;
+  if (id == null) return false;
+  if (id === 1) return true;
+  return id >= 3 && id <= SPEAKER_LETTERS.length;
+}
+
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState('');
   const [translatingIds, setTranslatingIds] = useState<Set<string>>(new Set());
   const [langs, setLangs] = useState<LangOption[]>([
     { code: 'ja', label: '日本語' },
@@ -158,6 +174,7 @@ export default function Home() {
   const pitchCentroidsRef = useRef<PitchCentroid[]>([]);
   const audioSourceRef = useRef<AudioSource>('mic');
   const activeSpeakerRef = useRef<number>(1);
+  const copyHintTimerRef = useRef<number | null>(null);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -646,16 +663,30 @@ export default function Home() {
     recorder.stop();
   };
 
-  const copyText = async (id: string, text: string) => {
+  const flashCopyHint = (message: string) => {
+    setCopyHint(message);
+    if (copyHintTimerRef.current != null) {
+      window.clearTimeout(copyHintTimerRef.current);
+    }
+    copyHintTimerRef.current = window.setTimeout(() => {
+      setCopyHint('');
+      copyHintTimerRef.current = null;
+    }, 1800);
+  };
+
+  const copyText = async (id: string, text: string): Promise<boolean> => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(id);
+      setCopyHint('');
       window.setTimeout(() => {
         setCopiedId((cur) => (cur === id ? null : cur));
       }, 1500);
+      return true;
     } catch (e) {
       console.error('copy failed:', e);
       setError('クリップボードへのコピーに失敗しました。');
+      return false;
     }
   };
 
@@ -736,12 +767,61 @@ export default function Home() {
     }
   };
 
-  /** Always oldest → newest, independent of which Note screen is open. */
-  const copyAll = async () => {
-    if (entries.length === 0) return;
-    const chronological = [...entries].sort((a, b) => a.note - b.note);
-    const all = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
-    await copyText('__all__', all);
+  /**
+   * Oldest → newest, independent of which Note screen is open.
+   * A successful copy (any of these buttons) stores the click time so
+   * 「前回の続き」 can return only utterances created after that.
+   */
+  const copySelection = async (
+    id: string,
+    list: TranscriptEntry[],
+    emptyHint: string
+  ) => {
+    if (list.length === 0) {
+      flashCopyHint(emptyHint);
+      return;
+    }
+    const chronological = [...list].sort((a, b) => a.note - b.note);
+    const text = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
+    const copiedAt = Date.now();
+    const ok = await copyText(id, text);
+    if (ok) saveLastCopyAt(copiedAt);
+  };
+
+  /** 全部コピー — full transcript (formerly すべてコピー; same text). */
+  const copyAll = () => {
+    void copySelection('__all__', entries, 'コピーする発言がありません');
+  };
+
+  /** セミナーだけ — speaker B, not mic 質問者. */
+  const copySeminarOnly = () => {
+    void copySelection(
+      '__seminar__',
+      entries.filter(isSeminarUtterance),
+      'セミナーなし'
+    );
+  };
+
+  /** 自分＋その他 — speaker A and C–G, not B. */
+  const copySelfAndOthers = () => {
+    void copySelection(
+      '__self__',
+      entries.filter(isSelfOrOtherUtterance),
+      '該当なし'
+    );
+  };
+
+  /** 前回の続き — items newer than the last successful copy. */
+  const copySinceLast = () => {
+    const cursor = loadLastCopyAt();
+    const newer =
+      cursor == null
+        ? entries
+        : entries.filter((e) => {
+            const t = Date.parse(e.at);
+            return Number.isFinite(t) && t > cursor;
+          });
+    void copySelection('__since__', newer, '新しい発言なし');
   };
 
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
@@ -1060,6 +1140,76 @@ export default function Home() {
     );
   };
 
+  const renderFeedActions = () => (
+    <div className={styles.copyActionRow}>
+      {untranslatedEn.length > 0 && (
+        <button
+          type="button"
+          className={styles.ghostButton}
+          onClick={translateAllEnglish}
+          disabled={translatingIds.size > 0}
+        >
+          {translateConfigured
+            ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
+            : 'Ollamaで全て翻訳'}
+        </button>
+      )}
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copyAll}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__all__' ? 'コピー済み' : '全部コピー'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySeminarOnly}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__seminar__' ? 'コピー済み' : 'セミナーだけ'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySelfAndOthers}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__self__' ? 'コピー済み' : '自分＋その他'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySinceLast}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__since__' ? 'コピー済み' : '前回の続き'}
+      </button>
+      <button
+        type="button"
+        className={`${styles.ghostButton} ${styles.copyClusterTail}`}
+        onClick={downloadAllAudioZip}
+        disabled={audioIds.size === 0 || audioBusyId === '__all__'}
+      >
+        {audioBusyId === '__all__' ? 'ZIP準備中…' : '録音をまとめてダウンロード'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButtonDanger}
+        onClick={clearAll}
+        disabled={entries.length === 0 && !summary}
+      >
+        Clear
+      </button>
+      {copyHint ? (
+        <span className={styles.copyHint} role="status">
+          {copyHint}
+        </span>
+      ) : null}
+    </div>
+  );
+
   const renderNoteScreen = (
     title: string,
     subtitle: string,
@@ -1122,46 +1272,7 @@ export default function Home() {
                 : `Showing ${list.length} · # stays chronological`}
             </p>
           </div>
-          <div className={styles.feedActions}>
-            {untranslatedEn.length > 0 && (
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={translateAllEnglish}
-                disabled={translatingIds.size > 0}
-              >
-                {translateConfigured
-                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
-                  : 'Ollamaで全て翻訳'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={copyAll}
-              disabled={entries.length === 0}
-            >
-              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={downloadAllAudioZip}
-              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
-            >
-              {audioBusyId === '__all__'
-                ? 'ZIP準備中…'
-                : '録音をまとめてダウンロード'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButtonDanger}
-              onClick={clearAll}
-              disabled={entries.length === 0 && !summary}
-            >
-              Clear
-            </button>
-          </div>
+          {renderFeedActions()}
         </div>
 
         {list.length === 0 ? (
@@ -1593,46 +1704,7 @@ export default function Home() {
 
       <section className={styles.feed}>
         <div className={styles.feedToolbar}>
-          <div className={styles.feedActions}>
-            {untranslatedEn.length > 0 && (
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={translateAllEnglish}
-                disabled={translatingIds.size > 0}
-              >
-                {translateConfigured
-                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
-                  : 'Ollamaで全て翻訳'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={copyAll}
-              disabled={entries.length === 0}
-            >
-              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={downloadAllAudioZip}
-              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
-            >
-              {audioBusyId === '__all__'
-                ? 'ZIP準備中…'
-                : '録音をまとめてダウンロード'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButtonDanger}
-              onClick={clearAll}
-              disabled={entries.length === 0 && !summary}
-            >
-              Clear
-            </button>
-          </div>
+          {renderFeedActions()}
         </div>
 
         {entries.length === 0 ? (
