@@ -22,7 +22,12 @@ import {
 import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   letterForSpeakerId,
+  quietSpeakerTag,
   SPEAKER_LETTERS,
+  ZOOM_CATEGORIES,
+  zoomCategoryForSpeaker,
+  zoomLetterButtonLabel,
+  type ZoomCategoryId,
 } from '@/lib/speaker-letters';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
@@ -53,6 +58,8 @@ type TranscriptEntry = {
   textJa?: string;
   /** 1-based speaker id */
   speakerId?: number;
+  /** mic vs Zoom/system, so meta labels can tell 質問者 from セミナー */
+  source?: 'mic' | 'system';
 };
 
 
@@ -417,6 +424,7 @@ export default function Home() {
               lang,
               at,
               speakerId: turn.speaker,
+              source: job.source,
             });
           }
           if (newEntries.length > 0) {
@@ -658,10 +666,27 @@ export default function Home() {
     const mic = micRoleLabel(speakerId);
     // Prefer mic role names when those ids were used as mic roles (no custom rename)
     if (mic && audioSource === 'mic') return mic;
-    const letter = letterForSpeakerId(speakerId);
-    // Zoom slot A is the local participant ("自分")
-    if (speakerId === 1) return `発言者${letter}（自分）`;
-    return `発言者${letter}`;
+    if (speakerId >= 1 && speakerId <= SPEAKER_LETTERS.length) {
+      return zoomLetterButtonLabel(speakerId);
+    }
+    return letterForSpeakerId(speakerId);
+  };
+
+  const categoryButtonClass = (id: ZoomCategoryId, active: boolean) => {
+    if (id === 'self') {
+      return active ? styles.categorySelfActive : styles.categorySelf;
+    }
+    if (id === 'seminar') {
+      return active ? styles.categorySeminarActive : styles.categorySeminar;
+    }
+    return active ? styles.categoryOtherActive : styles.categoryOther;
+  };
+
+  const letterRoleClass = (speakerId: number, active: boolean) => {
+    if (!active) return styles.letterRoleButton;
+    if (speakerId === 1) return styles.letterRoleSelfActive;
+    if (speakerId === 2) return styles.letterRoleSeminarActive;
+    return styles.letterRoleOtherActive;
   };
 
   const formatEntryForCopy = (e: TranscriptEntry) => {
@@ -1001,6 +1026,7 @@ export default function Home() {
   const renderEntryCard = (entry: TranscriptEntry) => {
     const isSelf = entry.speakerId === 1;
     const isOther = entry.speakerId != null && entry.speakerId !== 1;
+    const speakerTag = quietSpeakerTag(entry.speakerId, entry.source);
     return (
       <li
         key={entry.id}
@@ -1013,7 +1039,12 @@ export default function Home() {
         }
       >
         <div className={styles.entryMetaMinimal}>
-          <span className={styles.entryIndex}>#{entry.note}</span>
+          <span className={styles.entryMetaLead}>
+            <span className={styles.entryIndex}>#{entry.note}</span>
+            {speakerTag && (
+              <span className={styles.entrySpeakerQuiet}>{speakerTag}</span>
+            )}
+          </span>
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
@@ -1486,33 +1517,49 @@ export default function Home() {
                 <span className={styles.dockLabel}>
                   {isRecording ? 'いま話す人' : '次の話者'}
                 </span>
-                <div
-                  className={styles.letterToggle}
-                  role="group"
-                  aria-label="アクティブ話者 A〜G"
-                >
-                  {SPEAKER_LETTERS.map((letter, idx) => {
-                    const id = idx + 1;
-                    return (
-                      <button
-                        key={letter}
-                        type="button"
-                        className={
-                          id === 1
-                            ? activeSpeakerId === id
-                              ? styles.letterButtonSelfActive
-                              : styles.letterButtonSelf
-                            : activeSpeakerId === id
-                              ? styles.letterButtonOtherActive
-                              : styles.letterButtonOther
-                        }
-                        aria-pressed={activeSpeakerId === id}
-                        onClick={() => setActiveSpeakerId(id)}
-                      >
-                        {speakerDisplayName(id)}
-                      </button>
-                    );
-                  })}
+                <div className={styles.speakerPicker}>
+                  <div
+                    className={styles.categoryToggle}
+                    role="group"
+                    aria-label="話者カテゴリ"
+                  >
+                    {ZOOM_CATEGORIES.map((cat) => {
+                      const active =
+                        zoomCategoryForSpeaker(activeSpeakerId) === cat.id;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          className={categoryButtonClass(cat.id, active)}
+                          aria-pressed={active}
+                          onClick={() => setActiveSpeakerId(cat.speakerId)}
+                        >
+                          {cat.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div
+                    className={styles.letterToggle}
+                    role="group"
+                    aria-label="発言者 A〜G"
+                  >
+                    {SPEAKER_LETTERS.map((letter, idx) => {
+                      const id = idx + 1;
+                      const active = activeSpeakerId === id;
+                      return (
+                        <button
+                          key={letter}
+                          type="button"
+                          className={letterRoleClass(id, active)}
+                          aria-pressed={active}
+                          onClick={() => setActiveSpeakerId(id)}
+                        >
+                          {zoomLetterButtonLabel(id)}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
             )}

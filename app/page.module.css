@@ -499,6 +499,22 @@
   align-items: baseline;
   gap: 0.65rem;
   margin-bottom: 0.45rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.entryMetaLead {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+/* Quiet speaker word beside #N — same meta size, not a chip or body tag */
+.entrySpeakerQuiet {
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.01em;
 }
 
 .entryMeta {
@@ -1341,6 +1357,119 @@
   align-items: center;
   gap: 0.55rem 0.75rem;
   margin-top: 0.55rem;
+}
+
+/* One control group: big category buttons, letter roles beside or under */
+.speakerPicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 0.85rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.categoryToggle {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.categorySelf,
+.categorySelfActive,
+.categorySeminar,
+.categorySeminarActive,
+.categoryOther,
+.categoryOtherActive {
+  appearance: none;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 1.15rem;
+  line-height: 1.15;
+  min-height: 58px;
+  min-width: 6.75rem;
+  padding: 0.7rem 1.15rem;
+  border-radius: 14px;
+  border-width: 2px;
+  border-style: solid;
+}
+
+.categorySelf,
+.categorySelfActive {
+  border-color: rgba(52, 211, 153, 0.65);
+  background: rgba(52, 211, 153, 0.16);
+  color: #ecfdf5;
+}
+
+.categorySelfActive {
+  background: rgba(52, 211, 153, 0.4);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.28);
+}
+
+.categorySeminar,
+.categorySeminarActive {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(251, 191, 36, 0.14);
+  color: #fffbeb;
+}
+
+.categorySeminarActive {
+  background: rgba(251, 191, 36, 0.34);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.28);
+}
+
+.categoryOther,
+.categoryOtherActive {
+  border-color: rgba(148, 163, 184, 0.55);
+  background: rgba(148, 163, 184, 0.1);
+  color: #e2e8f0;
+}
+
+.categoryOtherActive {
+  background: rgba(148, 163, 184, 0.28);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.22);
+}
+
+.letterRoleButton,
+.letterRoleSelfActive,
+.letterRoleSeminarActive,
+.letterRoleOtherActive {
+  appearance: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  min-height: 36px;
+  max-width: 8.5rem;
+  padding: 0.28rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  white-space: normal;
+  text-align: center;
+}
+
+.letterRoleSelfActive {
+  border-color: rgba(52, 211, 153, 0.7);
+  background: rgba(52, 211, 153, 0.28);
+  color: #ecfdf5;
+  font-weight: 700;
+}
+
+.letterRoleSeminarActive {
+  border-color: rgba(251, 191, 36, 0.75);
+  background: rgba(251, 191, 36, 0.26);
+  color: #fffbeb;
+  font-weight: 700;
+}
+
+.letterRoleOtherActive {
+  border-color: rgba(148, 163, 184, 0.7);
+  background: rgba(148, 163, 184, 0.24);
+  color: #e2e8f0;
+  font-weight: 700;
 }
 
 .speakerModeBar {

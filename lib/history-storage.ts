@@ -12,6 +12,8 @@ export type StoredTranscriptEntry = {
   textJa?: string;
   /** 1-based speaker id when known / assigned */
   speakerId?: number;
+  /** Recording source when known. Mic id 2 is 質問者; Zoom id 2 is セミナー. */
+  source?: 'mic' | 'system';
 };
 
 export const HISTORY_STORAGE_KEY = 'minutes.transcript.entries.v1';
@@ -40,7 +42,8 @@ function isEntry(value: unknown): value is StoredTranscriptEntry {
     typeof e.at === 'string' &&
     (e.textJa === undefined || typeof e.textJa === 'string') &&
     (e.speakerId === undefined ||
-      (typeof e.speakerId === 'number' && Number.isFinite(e.speakerId)))
+      (typeof e.speakerId === 'number' && Number.isFinite(e.speakerId))) &&
+    (e.source === undefined || e.source === 'mic' || e.source === 'system')
   );
 }
 
