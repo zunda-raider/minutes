@@ -1776,6 +1776,14 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
+          <button
+            type="button"
+            className={styles.gdEntry}
+            onClick={() => setScreen('gd')}
+          >
+            <span className={styles.gdEntryBadge}>出航</span>
+            GDモード
+          </button>
         </div>
       </header>
 
@@ -1863,6 +1871,19 @@ export default function Home() {
                 <span className={styles.menuItemTitle}>要約</span>
                 <span className={styles.menuItemDesc}>
                   {summary ? '保存済み要約を展開' : '要約パネルを開く'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setScreen('gd');
+                }}
+              >
+                <span className={styles.menuItemTitle}>GDモード · 出航</span>
+                <span className={styles.menuItemDesc}>
+                  航海の準備画面。分析は出航のあと
                 </span>
               </button>
             </nav>
@@ -2038,10 +2059,11 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                className={styles.langButton}
+                className={styles.gdEntry}
                 aria-label="GDモード"
                 onClick={() => setScreen('gd')}
               >
+                <span className={styles.gdEntryBadge}>出航</span>
                 GDモード
               </button>
               {speakerMode === 'auto' && (
