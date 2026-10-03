@@ -24,6 +24,7 @@ import {
 import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   letterForSpeakerId,
+  ASSIGN_BUCKETS,
   quietSpeakerTag,
   SPEAKER_LETTERS,
   ZOOM_CATEGORIES,
@@ -109,12 +110,32 @@ function isSeminarUtterance(entry: TranscriptEntry): boolean {
   return entry.speakerId === 2 && entry.source !== 'mic';
 }
 
-/** Speaker A (自分) plus C–G. Excludes B (セミナー / 質問者) and unlabeled. */
+/** Speaker A (自分) plus C–G (それ以外 and leftover letters). Excludes B and unlabeled. */
 function isSelfOrOtherUtterance(entry: TranscriptEntry): boolean {
   const id = entry.speakerId;
   if (id == null) return false;
   if (id === 1) return true;
   return id >= 3 && id <= SPEAKER_LETTERS.length;
+}
+
+function entryIdFromNode(node: EventTarget | Node | null): string | null {
+  const el =
+    node instanceof Element
+      ? node
+      : node instanceof Node
+        ? node.parentElement
+        : null;
+  const li = el?.closest('[data-entry-id]');
+  return li?.getAttribute('data-entry-id') ?? null;
+}
+
+function rangeIds(listIds: string[], anchor: string, current: string): string[] {
+  const ia = listIds.indexOf(anchor);
+  const ib = listIds.indexOf(current);
+  if (ia < 0 || ib < 0) return [current];
+  const lo = Math.min(ia, ib);
+  const hi = Math.max(ia, ib);
+  return listIds.slice(lo, hi + 1);
 }
 
 export default function Home() {
@@ -144,8 +165,20 @@ export default function Home() {
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
-  /** Active speaker while recording (Zoom A–G or mic role). */
+  /** Active speaker while recording (Zoom A–G or mic role). Optional; sort afterward. */
   const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
+  /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const selectAnchorRef = useRef<string | null>(null);
+  const visibleIdsRef = useRef<string[]>([]);
+  const dragSelectRef = useRef<{
+    pointerId: number;
+    anchor: string;
+    listIds: string[];
+    base: Set<string>;
+  } | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);
   const genreInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -833,6 +866,8 @@ export default function Home() {
     setCopiedId(null);
     setAudioIds(new Set());
     setSpeakerLabels({});
+    setSelectedIds(new Set());
+    selectAnchorRef.current = null;
     lastSpeakerRef.current = null;
     pitchCentroidsRef.current = [];
     clearStoredEntries();
@@ -1103,20 +1138,143 @@ export default function Home() {
   };
 
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedIds(new Set());
+        selectAnchorRef.current = null;
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    const onSelectionChange = () => {
+      if (dragSelectRef.current) return;
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+      if (!entryIdFromNode(sel.anchorNode)) return;
+      const range = sel.getRangeAt(0);
+      const hits: string[] = [];
+      document.querySelectorAll('[data-entry-id]').forEach((node) => {
+        try {
+          if (!range.intersectsNode(node)) return;
+        } catch {
+          return;
+        }
+        const id = node.getAttribute('data-entry-id');
+        if (id) hits.push(id);
+      });
+      if (hits.length === 0) return;
+      selectAnchorRef.current = hits[0] ?? null;
+      setSelectedIds((prev) => {
+        if (prev.size === hits.length && hits.every((id) => prev.has(id))) return prev;
+        return new Set(hits);
+      });
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, []);
+
+  const entryIdAtPoint = (x: number, y: number, listIds: string[]) => {
+    const stack = document.elementsFromPoint(x, y);
+    for (const el of stack) {
+      const id = entryIdFromNode(el);
+      if (id && listIds.includes(id)) return id;
+    }
+    let best: { id: string; dist: number } | null = null;
+    for (const id of listIds) {
+      const el = document.querySelector(`[data-entry-id="${CSS.escape(id)}"]`);
+      if (!(el instanceof HTMLElement)) continue;
+      const rect = el.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom && x >= rect.left && x <= rect.right) {
+        return id;
+      }
+      const dist = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      if (!best || dist < best.dist) best = { id, dist };
+    }
+    return best && best.dist < 48 ? best.id : null;
+  };
+
+  const applyCardRange = (
+    anchor: string,
+    current: string,
+    listIds: string[],
+    base: Set<string>
+  ) => {
+    const next = new Set(base);
+    for (const id of rangeIds(listIds, anchor, current)) next.add(id);
+    setSelectedIds((prev) => {
+      if (prev.size === next.size && [...next].every((id) => prev.has(id))) return prev;
+      return next;
+    });
+  };
+
+  const onListPointerDown = (e: React.PointerEvent<HTMLUListElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('button, a, input, textarea, pre')) return;
+    const id = entryIdFromNode(target);
+    if (!id) return;
+    e.preventDefault();
+    window.getSelection()?.removeAllRanges();
+    const listIds = visibleIdsRef.current;
+    const additive = e.metaKey || e.ctrlKey;
+    const base = additive ? new Set(selectedIdsRef.current) : new Set<string>();
+    const anchor =
+      e.shiftKey && selectAnchorRef.current ? selectAnchorRef.current : id;
+    if (!e.shiftKey) selectAnchorRef.current = id;
+    dragSelectRef.current = { pointerId: e.pointerId, anchor, listIds, base };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    applyCardRange(anchor, id, listIds, base);
+  };
+
+  const onListPointerMove = (e: React.PointerEvent<HTMLUListElement>) => {
+    const drag = dragSelectRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const id = entryIdAtPoint(e.clientX, e.clientY, drag.listIds);
+    if (!id) return;
+    applyCardRange(drag.anchor, id, drag.listIds, drag.base);
+  };
+
+  const onListPointerUp = (e: React.PointerEvent<HTMLUListElement>) => {
+    const drag = dragSelectRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    dragSelectRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const assignSelectedBucket = (speakerId: number) => {
+    const ids = selectedIdsRef.current;
+    if (ids.size === 0) return;
+    setEntries((prev) =>
+      prev.map((entry) =>
+        ids.has(entry.id)
+          ? { ...entry, speakerId, source: 'system' as const }
+          : entry
+      )
+    );
+  };
+
   const renderEntryCard = (entry: TranscriptEntry) => {
     const isSelf = entry.speakerId === 1;
     const isOther = entry.speakerId != null && entry.speakerId !== 1;
     const speakerTag = quietSpeakerTag(entry.speakerId, entry.source);
+    const selected = selectedIds.has(entry.id);
+    const tone = isSelf
+      ? `${styles.entry} ${styles.entrySelf}`
+      : isOther
+        ? `${styles.entry} ${styles.entryOther}`
+        : styles.entry;
     return (
       <li
         key={entry.id}
-        className={
-          isSelf
-            ? `${styles.entry} ${styles.entrySelf}`
-            : isOther
-              ? `${styles.entry} ${styles.entryOther}`
-              : styles.entry
-        }
+        data-entry-id={entry.id}
+        className={selected ? `${tone} ${styles.entrySelected}` : tone}
       >
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryMetaLead}>
@@ -1137,6 +1295,59 @@ export default function Home() {
           </div>
         )}
       </li>
+    );
+  };
+
+  const renderAssignBar = () => {
+    if (selectedIds.size === 0) return null;
+    return (
+      <div className={styles.assignBar} role="toolbar" aria-label="選択した発言の話者">
+        <span className={styles.assignCount}>{selectedIds.size}件を</span>
+        {ASSIGN_BUCKETS.map((bucket) => (
+          <button
+            key={bucket.id}
+            type="button"
+            className={categoryButtonClass(bucket.id, false)}
+            onClick={() => assignSelectedBucket(bucket.speakerId)}
+          >
+            {bucket.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={styles.assignClear}
+          onClick={() => {
+            setSelectedIds(new Set());
+            selectAnchorRef.current = null;
+          }}
+        >
+          解除
+        </button>
+      </div>
+    );
+  };
+
+  const renderEntryList = (list: TranscriptEntry[]) => {
+    visibleIdsRef.current = list.map((entry) => entry.id);
+    return (
+      <>
+        {selectedIds.size === 0 ? (
+          <p className={styles.assignHint}>
+            カードをドラッグ、または文字を選択してから 自分 / セミナー / それ以外
+          </p>
+        ) : (
+          renderAssignBar()
+        )}
+        <ul
+          className={styles.entryList}
+          onPointerDown={onListPointerDown}
+          onPointerMove={onListPointerMove}
+          onPointerUp={onListPointerUp}
+          onPointerCancel={onListPointerUp}
+        >
+          {list.map(renderEntryCard)}
+        </ul>
+      </>
     );
   };
 
@@ -1292,7 +1503,7 @@ export default function Home() {
             </button>
           </div>
         ) : (
-          <ul className={styles.entryList}>{list.map(renderEntryCard)}</ul>
+          renderEntryList(list)
         )}
       </section>
     </div>
@@ -1601,6 +1812,10 @@ export default function Home() {
             </div>
 
             {speakerMode === 'manual' && (
+              <details className={styles.optionalSpeaker}>
+                <summary className={styles.optionalSpeakerSummary}>
+                  録音中に話者を切り替える（任意）
+                </summary>
               <div className={styles.activeSpeakerBar}>
                 <span className={styles.dockLabel}>
                   {isRecording ? 'いま話す人' : '次の話者'}
@@ -1650,6 +1865,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+              </details>
             )}
           </>
         )}
@@ -1719,9 +1935,7 @@ export default function Home() {
             </p>
           </div>
         ) : (
-          <ul className={styles.entryList}>
-            {note2Entries.map(renderEntryCard)}
-          </ul>
+          renderEntryList(note2Entries)
         )}
       </section>
     </div>
