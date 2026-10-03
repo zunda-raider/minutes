@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import gd from './gd.module.css';
 import {
@@ -69,6 +69,23 @@ function isAnalysis(value: unknown): value is GdAnalysis {
   );
 }
 
+function smoothDetour(
+  d: string,
+  fromX: number,
+  fromY: number,
+  x: number,
+  y: number,
+  backToRoute: boolean,
+  routeY: number,
+): string {
+  const midY = (fromY + y) / 2;
+  let next = `${d} C ${fromX + (x - fromX) * 0.4} ${fromY}, ${x - 20} ${midY}, ${x} ${y}`;
+  if (backToRoute) {
+    next += ` C ${x + 22} ${midY}, ${x + 8} ${routeY}, ${x} ${routeY}`;
+  }
+  return next;
+}
+
 function Voyage({
   markers,
   conclusion,
@@ -76,28 +93,55 @@ function Voyage({
   markers: VoyageMarker[];
   conclusion: string;
 }) {
-  const X0 = 78;
-  const X1 = 800;
-  const Y0 = 168;
+  const rawId = useId().replace(/:/g, '');
+  const X0 = 72;
+  const X1 = 736;
+  const Y0 = 214;
   const sx = (m: VoyageMarker) => {
     const base = X0 + m.x * (X1 - X0);
     if (m.effect === '前進') return base;
-    // A few px so 停滞 / 脱線 are not hidden under the previous 前進 dot.
-    return Math.min(base + 16, X1 - 4);
+    return Math.min(base + 14, X1 - 8);
   };
-  const sy = (m: VoyageMarker) => Y0 + m.y * 78;
-  const points = [
-    `${X0},${Y0}`,
-    ...markers.map((m) => `${sx(m)},${sy(m)}`),
-  ].join(' ');
+  const sy = (m: VoyageMarker) => {
+    if (m.effect === '脱線') return Y0 + (m.y < 0 ? -78 : 78);
+    if (m.effect === '停滞') return Y0 + m.y * 46;
+    return Y0;
+  };
   const last = markers[markers.length - 1];
-  const ship = last ? { x: sx(last), y: sy(last) } : { x: X0, y: Y0 };
+  const ship = !last
+    ? { x: X0, y: Y0 }
+    : last.effect === '脱線'
+      ? { x: sx(last), y: sy(last) }
+      : { x: sx(last), y: Y0 };
+
+  let sailed = `M ${X0} ${Y0}`;
+  let cx = X0;
+  let cy = Y0;
+  markers.forEach((m, i) => {
+    const x = sx(m);
+    const y = sy(m);
+    if (m.effect === '脱線') {
+      const back = i !== markers.length - 1;
+      sailed = smoothDetour(sailed, cx, cy, x, y, back, Y0);
+      cx = x;
+      cy = back ? Y0 : y;
+    } else {
+      sailed += ` L ${x.toFixed(1)} ${Y0}`;
+      cx = x;
+      cy = Y0;
+    }
+  });
+
   const showLabels = markers.length > 0 && markers.length <= 18;
+  const skyId = `${rawId}-sky`;
+  const seaId = `${rawId}-sea`;
+  const sandId = `${rawId}-sand`;
+  const softId = `${rawId}-soft`;
 
   return (
     <svg
       className={gd.sea}
-      viewBox="0 0 960 300"
+      viewBox="0 0 960 360"
       role="img"
       aria-label={
         conclusion
@@ -106,78 +150,208 @@ function Voyage({
       }
     >
       <defs>
-        <linearGradient id="gdSea" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#0c4a6e" />
-          <stop offset="1" stopColor="#082032" />
+        <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7dd3fc" />
+          <stop offset="0.55" stopColor="#e0f2fe" />
+          <stop offset="1" stopColor="#fef3c7" />
         </linearGradient>
+        <linearGradient id={seaId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#38bdf8" />
+          <stop offset="0.35" stopColor="#0284c7" />
+          <stop offset="0.72" stopColor="#075985" />
+          <stop offset="1" stopColor="#082f49" />
+        </linearGradient>
+        <linearGradient id={sandId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#fde68a" />
+          <stop offset="1" stopColor="#f6d7a7" />
+        </linearGradient>
+        <filter id={softId} x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="1.2" stdDeviation="1.4" floodColor="#0f172a" floodOpacity="0.35" />
+        </filter>
       </defs>
-      <rect width="960" height="300" fill="url(#gdSea)" />
-      <path
-        d="M0 214 Q 60 198 120 214 T 240 214 T 360 214 T 480 214 T 600 214 T 720 214 T 840 214 T 960 214"
-        fill="none"
-        stroke="rgba(186, 230, 253, 0.28)"
-        strokeWidth="2"
-      />
-      <path
-        d="M0 236 Q 70 224 140 236 T 280 236 T 420 236 T 560 236 T 700 236 T 840 236 T 980 236"
-        fill="none"
-        stroke="rgba(125, 211, 252, 0.18)"
-        strokeWidth="2"
-      />
+
+      <rect width="960" height="360" fill={`url(#${skyId})`} />
+      <circle cx="118" cy="52" r="34" fill="#fde68a" opacity="0.35" />
+      <circle cx="118" cy="52" r="20" fill="#facc15" />
+      <g fill="#ffffff" opacity="0.9">
+        <ellipse cx="250" cy="48" rx="28" ry="12" />
+        <ellipse cx="274" cy="44" rx="20" ry="14" />
+        <ellipse cx="228" cy="46" rx="16" ry="10" />
+        <ellipse cx="620" cy="36" rx="34" ry="13" />
+        <ellipse cx="650" cy="32" rx="22" ry="14" />
+        <ellipse cx="592" cy="34" rx="18" ry="11" />
+      </g>
+      <g fill="none" stroke="#0f172a" strokeWidth="1.4" strokeLinecap="round" opacity="0.45">
+        <path d="M400 58 l8 6 l8 -6" />
+        <path d="M438 44 l7 5 l7 -5" />
+      </g>
+
+      <rect y="128" width="960" height="232" fill={`url(#${seaId})`} />
+      <g className={gd.waveDrift} fill="none">
+        <path
+          d="M-320 168 Q-240 150 -160 168 T0 168 T160 168 T320 168 T480 168 T640 168 T800 168 T960 168 T1120 168 T1280 168"
+          stroke="rgba(255,255,255,0.28)"
+          strokeWidth="2"
+        />
+        <path
+          className={gd.waveFill}
+          d="M-320 250 Q-240 232 -160 250 T0 250 T160 250 T320 250 T480 250 T640 250 T800 250 T960 250 T1120 250 T1280 250 V360 H-320 Z"
+        />
+        <path
+          d="M-320 286 Q-240 270 -160 286 T0 286 T160 286 T320 286 T480 286 T640 286 T800 286 T960 286 T1120 286 T1280 286"
+          stroke="rgba(224,242,254,0.45)"
+          strokeWidth="2"
+        />
+        <path
+          className={gd.waveFillDeep}
+          d="M-320 312 Q-240 298 -160 312 T0 312 T160 312 T320 312 T480 312 T640 312 T800 312 T960 312 T1120 312 T1280 312 V360 H-320 Z"
+        />
+      </g>
+
       <line
         x1={X0}
         y1={Y0}
         x2="860"
         y2={Y0}
-        stroke="rgba(255,255,255,0.38)"
-        strokeDasharray="6 7"
+        stroke="rgba(255,255,255,0.72)"
+        strokeDasharray="7 8"
+        strokeLinecap="round"
       />
-      <circle cx={X0} cy={Y0} r="7" fill="#e2e8f0" />
-      <text x="24" y="196" fill="#e2e8f0" fontSize="13">
-        出発
-      </text>
-      <ellipse cx="890" cy="196" rx="54" ry="18" fill="#3f6b45" />
-      <path d="M858 188 L890 138 L922 188 Z" fill="#86efac" />
-      <text x="868" y="230" fill="#ecfdf5" fontSize="13">
-        結論
-      </text>
       {markers.length > 0 && (
-        <polyline
-          points={points}
-          fill="none"
-          stroke="rgba(224, 242, 254, 0.85)"
-          strokeWidth="2"
-        />
+        <>
+          <path d={sailed} fill="none" stroke="rgba(15,23,42,0.35)" strokeWidth="7" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={sailed} fill="none" stroke="#f8fafc" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+        </>
       )}
-      {markers.map((m) => {
+
+      <g filter={`url(#${softId})`}>
+        <ellipse cx="878" cy="236" rx="78" ry="18" fill="#c2410c" opacity="0.25" />
+        <ellipse cx="878" cy="228" rx="74" ry="16" fill={`url(#${sandId})`} />
+        <path d="M824 214 Q858 176 902 208 Q934 186 952 220 Q918 208 878 216 Q846 222 824 214 Z" fill="#16a34a" />
+        <path d="M846 218 Q872 192 904 214 Q880 206 858 216 Z" fill="#4ade80" />
+        <path d="M812 228 H846" stroke="#d6d3d1" strokeWidth="4" strokeLinecap="round" />
+        <path d="M908 216 C918 192 898 168 916 146" fill="none" stroke="#92400e" strokeWidth="4" strokeLinecap="round" />
+        <g fill="none" stroke="#15803d" strokeWidth="2.6" strokeLinecap="round">
+          <path d="M916 148 C900 132 882 146 874 134" />
+          <path d="M916 148 C932 128 954 138 958 122" />
+          <path d="M916 148 C936 150 952 166 944 178" />
+          <path d="M916 148 C898 160 884 150 874 164" />
+        </g>
+        <path d="M846 226 V168" stroke="#78350f" strokeWidth="3" strokeLinecap="round" />
+        <rect x="812" y="150" width="70" height="28" rx="6" fill="#fffbeb" stroke="#78350f" strokeWidth="1.6" />
+        <text x="847" y="170" textAnchor="middle" fill="#78350f" fontSize="15" fontWeight="700">
+          結論
+        </text>
+      </g>
+
+      <g>
+        <circle cx={X0} cy={Y0} r="9" fill="#f8fafc" stroke="#0369a1" strokeWidth="3" />
+        <circle cx={X0} cy={Y0} r="3" fill="#0369a1" />
+        <text
+          x="36"
+          y="188"
+          fill="#0f172a"
+          fontSize="14"
+          fontWeight="700"
+          stroke="#f8fafc"
+          strokeWidth="4"
+          paintOrder="stroke"
+          strokeLinejoin="round"
+        >
+          出発
+        </text>
+      </g>
+
+      {markers.map((m, i) => {
         const x = sx(m);
         const y = sy(m);
         const label = `#${formatGdNote(m.note)} ${m.effect}${m.self ? ' 自分' : ''}`;
+        const flagDown = y < 96;
+        const selfSlot = markers.slice(0, i + 1).filter((item) => item.self).length - 1;
+        const flagLift = m.self ? (selfSlot % 4) * 16 : 0;
+        const anchorY = Math.abs(y - Y0) < 40 ? Y0 : y;
+        const poleY = flagDown ? anchorY + 30 + flagLift : anchorY - 34 - flagLift;
+        const flagOnLeft = i === markers.length - 1 || x > 680 || (m.self && selfSlot % 2 === 1);
+        const noteX =
+          m.effect === '脱線' ? x - 14 : m.effect === '停滞' ? x + (m.y >= 0 ? 16 : -16) : x;
+        const noteY =
+          m.effect === '脱線' ? y + 4 : m.effect === '停滞' ? (m.y >= 0 ? y + 16 : y - 12) : y + 18;
+        const noteAnchor = m.effect === '前進' ? 'middle' : m.y >= 0 && m.effect === '停滞' ? 'start' : 'end';
         return (
-          <g key={`${formatGdNote(m.note)}-${m.effect}`}>
-            <circle cx={x} cy={y} r="6.5" fill={EFFECT_FILL[m.effect] ?? EFFECT_FILL['停滞']}>
+          <g key={`${formatGdNote(m.note)}-${m.effect}-${i}`}>
+            <circle
+              cx={x}
+              cy={y}
+              r="7"
+              fill={EFFECT_FILL[m.effect] ?? EFFECT_FILL['停滞']}
+              stroke="#ffffff"
+              strokeWidth="1.6"
+            >
               <title>{label}</title>
             </circle>
             {m.self && (
               <g>
-                <path d={`M${x} ${y - 8} L${x} ${y - 24}`} stroke="#ffe4e6" strokeWidth="1.4" />
                 <path
-                  d={`M${x} ${y - 24} L${x + 12} ${y - 19} L${x} ${y - 14} Z`}
-                  fill="#fb7185"
+                  d={`M${x} ${flagDown ? y + 8 : y - 8} L${x} ${poleY}`}
+                  stroke="#fff1f2"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
                 />
+                <path
+                  d={
+                    flagDown
+                      ? `M${x} ${poleY} L${x + (flagOnLeft ? -18 : 18)} ${poleY - 6} L${x} ${poleY - 12} Z`
+                      : `M${x} ${poleY} L${x + (flagOnLeft ? -18 : 18)} ${poleY + 6} L${x} ${poleY + 12} Z`
+                  }
+                  fill="#fb7185"
+                  stroke="#fff1f2"
+                  strokeWidth="0.8"
+                />
+                {showLabels && (
+                  <text
+                    x={flagOnLeft ? x - 22 : x + 22}
+                    y={poleY + 4}
+                    textAnchor={flagOnLeft ? 'end' : 'start'}
+                    fill="#fff1f2"
+                    fontSize="12"
+                    fontWeight="700"
+                    stroke="#9f1239"
+                    strokeWidth="3.5"
+                    paintOrder="stroke"
+                    strokeLinejoin="round"
+                  >
+                    自分
+                  </text>
+                )}
               </g>
             )}
             {showLabels && (
-              <text x={x + 8} y={y + 16} fill="#e2e8f0" fontSize="10">
+              <text
+                x={noteX}
+                y={noteY}
+                textAnchor={noteAnchor}
+                fill="#f8fafc"
+                fontSize="11"
+                fontWeight="700"
+                stroke="#0f172a"
+                strokeWidth="3.5"
+                paintOrder="stroke"
+                strokeLinejoin="round"
+              >
                 {`#${formatGdNote(m.note)}`}
               </text>
             )}
           </g>
         );
       })}
-      <g transform={`translate(${ship.x} ${ship.y - 18})`} aria-hidden="true">
-        <path d="M-16 8 L16 8 L10 16 L-10 16 Z" fill="#f8fafc" />
-        <path d="M0 8 L0 -6" stroke="#e2e8f0" strokeWidth="1.5" />
+
+      <g transform={`translate(${ship.x} ${ship.y - 16})`} filter={`url(#${softId})`} aria-hidden="true">
+        <path d="M-26 8 Q-10 14 2 8 Q14 16 28 6" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" />
+        <path d="M-18 4 L22 0 L14 12 L-12 12 Z" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.1" />
+        <path d="M-4 4 L2 -2 L8 4 Z" fill="#fb7185" />
+        <path d="M2 2 L2 -20" stroke="#1e293b" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M3 -18 L3 0 L20 -7 Z" fill="#fff7ed" stroke="#9a3412" strokeWidth="0.9" />
+        <path d="M3 -18 L14 -13 L3 -9 Z" fill="#e11d48" />
       </g>
     </svg>
   );
