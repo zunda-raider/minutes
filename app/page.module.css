@@ -350,10 +350,16 @@
 
 .feedHeader {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.feedHeader > div:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .feedTitle {
@@ -373,6 +379,41 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+/* Transcript copy controls stay on one row: new filters left, download/Clear right. */
+.copyActionRow {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.28rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.copyActionRow .ghostButton,
+.copyActionRow .ghostButtonDanger {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0.12rem 0.4rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.copyClusterTail {
+  margin-left: 0.2rem;
+}
+
+.copyHint {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--warn);
 }
 
 .ghostButton,
@@ -634,6 +675,17 @@
   .ghostButton,
   .ghostButtonDanger {
     flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .copyActionRow {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .copyActionRow .ghostButton,
+  .copyActionRow .ghostButtonDanger {
+    flex: 0 0 auto;
     text-align: center;
   }
 }
@@ -1001,6 +1053,7 @@
   display: flex;
   justify-content: flex-end;
   margin-bottom: 0.85rem;
+  min-width: 0;
 }
 
 .summaryBody {

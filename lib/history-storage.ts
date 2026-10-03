@@ -21,6 +21,8 @@ export const SUMMARY_STORAGE_KEY = 'minutes.transcript.summary.v1';
 export const GENRE_STORAGE_KEY = 'minutes.meeting.genre.v1';
 export const SPEAKER_LABELS_KEY = 'minutes.speakers.labels.v1';
 export const SPEAKER_MODE_KEY = 'minutes.speakers.mode.v1';
+/** Epoch ms of the last successful transcript copy (any copy button). */
+export const LAST_COPY_AT_KEY = 'minutes.copy.lastAt.v1';
 
 function canUseStorage(): boolean {
   return (
@@ -206,5 +208,28 @@ export function saveSpeakerMode(mode: SpeakerMode): void {
   } catch (err) {
     console.error('speaker mode save failed:', err);
     throw err;
+  }
+}
+
+/** Last successful copy time (epoch ms), or null if the user has not copied yet. */
+export function loadLastCopyAt(): number | null {
+  if (!canUseStorage()) return null;
+  try {
+    const raw = localStorage.getItem(LAST_COPY_AT_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch (err) {
+    console.error('last copy load failed:', err);
+    return null;
+  }
+}
+
+export function saveLastCopyAt(ms: number): void {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.setItem(LAST_COPY_AT_KEY, String(ms));
+  } catch (err) {
+    console.error('last copy save failed:', err);
   }
 }
