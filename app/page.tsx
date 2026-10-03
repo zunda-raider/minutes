@@ -15,13 +15,16 @@ import {
   saveSpeakerLabels,
   saveSpeakerMode,
   saveSummary,
+  loadLastCopyAt,
   loadSpeakerMode,
+  saveLastCopyAt,
   type SpeakerLabels,
   type SpeakerMode,
 } from '@/lib/history-storage';
 import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   letterForSpeakerId,
+  ASSIGN_BUCKETS,
   quietSpeakerTag,
   SPEAKER_LETTERS,
   ZOOM_CATEGORIES,
@@ -29,6 +32,8 @@ import {
   zoomLetterButtonLabel,
   type ZoomCategoryId,
 } from '@/lib/speaker-letters';
+import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
+import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -38,6 +43,7 @@ import {
 } from '@/lib/pitch-diarize';
 import {
   clearAllAudio,
+  deleteAudioSegments,
   filenameForSegment,
   getAudioSegment,
   listAudioIds,
@@ -102,12 +108,111 @@ function isEnglishEntry(entry: TranscriptEntry): boolean {
   return entry.lang === 'en' || entry.lang.startsWith('en-');
 }
 
+/** Zoom speaker B. Mic id 2 is 質問者, not セミナー. */
+function isSeminarUtterance(entry: TranscriptEntry): boolean {
+  return entry.speakerId === 2 && entry.source !== 'mic';
+}
+
+/** Speaker A (自分) plus C–G (それ以外 and leftover letters). Excludes B and unlabeled. */
+function isSelfOrOtherUtterance(entry: TranscriptEntry): boolean {
+  const id = entry.speakerId;
+  if (id == null) return false;
+  if (id === 1) return true;
+  return id >= 3 && id <= SPEAKER_LETTERS.length;
+}
+
+function entryIdFromNode(node: EventTarget | Node | null): string | null {
+  const el =
+    node instanceof Element
+      ? node
+      : node instanceof Node
+        ? node.parentElement
+        : null;
+  const li = el?.closest('[data-entry-id]');
+  return li?.getAttribute('data-entry-id') ?? null;
+}
+
+function formatNote(note: number): string {
+  if (!Number.isFinite(note)) return '?';
+  if (Math.abs(note - Math.round(note)) < 1e-6) return String(Math.round(note));
+  return note.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+/** Offsets of a DOM range inside a transcript node. null if the range misses it. */
+function textSpanIn(root: HTMLElement, range: Range): TextSpan | null {
+  if (!root.textContent) return null;
+  let hits = false;
+  try {
+    hits = range.intersectsNode(root);
+  } catch {
+    return null;
+  }
+  if (!hits) return null;
+  const content = document.createRange();
+  content.selectNodeContents(root);
+  const startRange = document.createRange();
+  startRange.setStart(content.startContainer, content.startOffset);
+  if (range.compareBoundaryPoints(Range.START_TO_START, content) <= 0) {
+    startRange.setEnd(content.startContainer, content.startOffset);
+  } else {
+    startRange.setEnd(range.startContainer, range.startOffset);
+  }
+  const endRange = document.createRange();
+  endRange.setStart(content.startContainer, content.startOffset);
+  if (range.compareBoundaryPoints(Range.END_TO_END, content) >= 0) {
+    endRange.setEnd(content.endContainer, content.endOffset);
+  } else {
+    endRange.setEnd(range.endContainer, range.endOffset);
+  }
+  const start = startRange.toString().length;
+  const end = endRange.toString().length;
+  if (end <= start) return null;
+  return { start, end };
+}
+
+function rangeIds(listIds: string[], anchor: string, current: string): string[] {
+  const ia = listIds.indexOf(anchor);
+  const ib = listIds.indexOf(current);
+  if (ia < 0 || ib < 0) return [current];
+  const lo = Math.min(ia, ib);
+  const hi = Math.max(ia, ib);
+  return listIds.slice(lo, hi + 1);
+}
+
+/** Live DOM selection inside transcript cards. null when nothing is selected. */
+function readTextSelection(): { hits: string[]; spans: Map<string, TextSpan> } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+  if (!entryIdFromNode(sel.anchorNode)) return null;
+  const range = sel.getRangeAt(0);
+  const hits: string[] = [];
+  const spans = new Map<string, TextSpan>();
+  document.querySelectorAll('[data-entry-id]').forEach((node) => {
+    try {
+      if (!range.intersectsNode(node)) return;
+    } catch {
+      return;
+    }
+    const id = node.getAttribute('data-entry-id');
+    if (!id) return;
+    hits.push(id);
+    const root = node.querySelector('[data-transcript]');
+    if (root instanceof HTMLElement) {
+      const span = textSpanIn(root, range);
+      if (span) spans.set(id, span);
+    }
+  });
+  if (hits.length === 0) return null;
+  return { hits, spans };
+}
+
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState('');
   const [translatingIds, setTranslatingIds] = useState<Set<string>>(new Set());
   const [langs, setLangs] = useState<LangOption[]>([
     { code: 'ja', label: '日本語' },
@@ -128,8 +233,34 @@ export default function Home() {
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
-  /** Active speaker while recording (Zoom A–G or mic role). */
+  /** Active speaker while recording (Zoom A–G or mic role). Optional; sort afterward. */
   const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
+  /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  /** Ids waiting for a second click to confirm delete. */
+  const [armedDelete, setArmedDelete] = useState<string[] | null>(null);
+  /**
+   * cards: drag highlighted whole cards (entrySelected).
+   * text: DOM text selection — do not toggle entrySelected or the browser
+   * collapses the range mid-drag / on commit.
+   */
+  const [selectionKind, setSelectionKind] = useState<'cards' | 'text'>('cards');
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const selectionKindRef = useRef(selectionKind);
+  selectionKindRef.current = selectionKind;
+  /** Card-drag pointerup must not also commit a text selection. */
+  const suppressTextCommitRef = useRef(false);
+  const selectAnchorRef = useRef<string | null>(null);
+  /** Partial transcript offsets captured while the text selection is still live. */
+  const textSpansRef = useRef<Map<string, TextSpan>>(new Map());
+  const visibleIdsRef = useRef<string[]>([]);
+  const dragSelectRef = useRef<{
+    pointerId: number;
+    anchor: string;
+    listIds: string[];
+    base: Set<string>;
+  } | null>(null);
   const summaryRef = useRef<HTMLElement | null>(null);
   const genreInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -152,12 +283,14 @@ export default function Home() {
   };
   const uploadQueueRef = useRef<UploadJob[]>([]);
   const queueRunningRef = useRef(false);
+  /** Highest note number issued. Not a length, so deletes keep gaps. */
   const entriesLenRef = useRef(0);
   const lastSpeakerRef = useRef<number | null>(null);
   const speakerModeRef = useRef<SpeakerMode>('manual');
   const pitchCentroidsRef = useRef<PitchCentroid[]>([]);
   const audioSourceRef = useRef<AudioSource>('mic');
   const activeSpeakerRef = useRef<number>(1);
+  const copyHintTimerRef = useRef<number | null>(null);
 
   const isTranscribing = pendingCount > 0;
   const untranslatedEn = entries.filter(
@@ -216,7 +349,10 @@ export default function Home() {
 
   // Persist on every change after hydrate (including clear → [])
   useEffect(() => {
-    entriesLenRef.current = entries.length;
+    const maxNote = entries.reduce((max, entry) => Math.max(max, entry.note), 0);
+    // Ceil so a split fragment (2.5) does not make the next recording note fractional.
+    const ceiling = Math.ceil(maxNote - 1e-9);
+    if (ceiling > entriesLenRef.current) entriesLenRef.current = ceiling;
   }, [entries]);
 
   useEffect(() => {
@@ -646,16 +782,30 @@ export default function Home() {
     recorder.stop();
   };
 
-  const copyText = async (id: string, text: string) => {
+  const flashCopyHint = (message: string) => {
+    setCopyHint(message);
+    if (copyHintTimerRef.current != null) {
+      window.clearTimeout(copyHintTimerRef.current);
+    }
+    copyHintTimerRef.current = window.setTimeout(() => {
+      setCopyHint('');
+      copyHintTimerRef.current = null;
+    }, 1800);
+  };
+
+  const copyText = async (id: string, text: string): Promise<boolean> => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedId(id);
+      setCopyHint('');
       window.setTimeout(() => {
         setCopiedId((cur) => (cur === id ? null : cur));
       }, 1500);
+      return true;
     } catch (e) {
       console.error('copy failed:', e);
       setError('クリップボードへのコピーに失敗しました。');
+      return false;
     }
   };
 
@@ -736,23 +886,79 @@ export default function Home() {
     }
   };
 
-  /** Always oldest → newest, independent of which Note screen is open. */
-  const copyAll = async () => {
-    if (entries.length === 0) return;
-    const chronological = [...entries].sort((a, b) => a.note - b.note);
-    const all = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
-    await copyText('__all__', all);
+  /**
+   * Oldest → newest, independent of which Note screen is open.
+   * A successful copy (any of these buttons) stores the click time so
+   * 「前回の続き」 can return only utterances created after that.
+   */
+  const copySelection = async (
+    id: string,
+    list: TranscriptEntry[],
+    emptyHint: string
+  ) => {
+    if (list.length === 0) {
+      flashCopyHint(emptyHint);
+      return;
+    }
+    const chronological = [...list].sort((a, b) => a.note - b.note);
+    const text = chronological.map(formatEntryForCopy).join('\n\n---\n\n');
+    const copiedAt = Date.now();
+    const ok = await copyText(id, text);
+    if (ok) saveLastCopyAt(copiedAt);
+  };
+
+  /** 全部コピー — full transcript (formerly すべてコピー; same text). */
+  const copyAll = () => {
+    void copySelection('__all__', entries, 'コピーする発言がありません');
+  };
+
+  /** セミナーだけ — speaker B, not mic 質問者. */
+  const copySeminarOnly = () => {
+    void copySelection(
+      '__seminar__',
+      entries.filter(isSeminarUtterance),
+      'セミナーなし'
+    );
+  };
+
+  /** 自分＋その他 — speaker A and C–G, not B. */
+  const copySelfAndOthers = () => {
+    void copySelection(
+      '__self__',
+      entries.filter(isSelfOrOtherUtterance),
+      '該当なし'
+    );
+  };
+
+  /** 前回の続き — items newer than the last successful copy. */
+  const copySinceLast = () => {
+    const cursor = loadLastCopyAt();
+    const newer =
+      cursor == null
+        ? entries
+        : entries.filter((e) => {
+            const t = Date.parse(e.at);
+            return Number.isFinite(t) && t > cursor;
+          });
+    void copySelection('__since__', newer, '新しい発言なし');
   };
 
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
+  // Home only: newer segments on top, split pieces of one segment still read downward.
+  const homeEntries = newestFirstReadingOrder(entries);
 
   const clearAll = () => {
     setEntries([]);
+    entriesLenRef.current = 0;
     setSummary('');
     setCopiedId(null);
     setAudioIds(new Set());
     setSpeakerLabels({});
+    setSelectedIds(new Set());
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
     lastSpeakerRef.current = null;
     pitchCentroidsRef.current = [];
     clearStoredEntries();
@@ -1023,24 +1229,256 @@ export default function Home() {
   };
 
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedIds(new Set());
+        setSelectionKind('cards');
+        setArmedDelete(null);
+        selectAnchorRef.current = null;
+        textSpansRef.current = new Map();
+        window.getSelection()?.removeAllRanges();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const commitTextSelection = () => {
+    const read = readTextSelection();
+    if (!read) return false;
+    textSpansRef.current = read.spans;
+    selectAnchorRef.current = read.hits[0] ?? null;
+    const next = new Set(read.hits);
+    selectedIdsRef.current = next;
+    selectionKindRef.current = 'text';
+    setSelectionKind('text');
+    setSelectedIds((prev) => {
+      if (prev.size === next.size && read.hits.every((id) => prev.has(id))) return prev;
+      return next;
+    });
+    return true;
+  };
+
+  const clearCardSelection = () => {
+    if (selectedIdsRef.current.size === 0 && selectionKindRef.current === 'cards') return;
+    selectedIdsRef.current = new Set();
+    selectionKindRef.current = 'cards';
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    setSelectionKind('cards');
+    setSelectedIds(new Set());
+  };
+
+  useEffect(() => {
+    // Refs only. setState here re-renders the card (entrySelected) and Chrome
+    // drops the text range before the user finishes dragging.
+    const onSelectionChange = () => {
+      if (dragSelectRef.current) return;
+      const read = readTextSelection();
+      if (!read) return;
+      textSpansRef.current = read.spans;
+      selectAnchorRef.current = read.hits[0] ?? null;
+      selectedIdsRef.current = new Set(read.hits);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      // Chrome fires pointercancel instead of pointerup when a re-render
+      // moves the card mid-drag. Still commit, or the Home toolbar never appears.
+      if (e.type !== 'pointercancel' && e.button !== 0) return;
+      if (suppressTextCommitRef.current) {
+        suppressTextCommitRef.current = false;
+        return;
+      }
+      if (dragSelectRef.current) return;
+      if (commitTextSelection()) return;
+      // Clicking transcript text with no range used to clear a card selection
+      // on pointerdown. Do it after pointerup so the drag is not re-rendered.
+      if (e.type === 'pointercancel') return;
+      const target = e.target;
+      if (!(target instanceof Element) || !target.closest('[data-transcript], pre')) return;
+      if (selectedIdsRef.current.size === 0) return;
+      clearCardSelection();
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Shift') return;
+      if (dragSelectRef.current) return;
+      const target = e.target;
+      if (target instanceof Element && target.closest('input, textarea')) return;
+      commitTextSelection();
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      document.removeEventListener('selectionchange', onSelectionChange);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  const entryIdAtPoint = (x: number, y: number, listIds: string[]) => {
+    const stack = document.elementsFromPoint(x, y);
+    for (const el of stack) {
+      const id = entryIdFromNode(el);
+      if (id && listIds.includes(id)) return id;
+    }
+    let best: { id: string; dist: number } | null = null;
+    for (const id of listIds) {
+      const el = document.querySelector(`[data-entry-id="${CSS.escape(id)}"]`);
+      if (!(el instanceof HTMLElement)) continue;
+      const rect = el.getBoundingClientRect();
+      if (y >= rect.top && y <= rect.bottom && x >= rect.left && x <= rect.right) {
+        return id;
+      }
+      const dist = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+      if (!best || dist < best.dist) best = { id, dist };
+    }
+    return best && best.dist < 48 ? best.id : null;
+  };
+
+  const applyCardRange = (
+    anchor: string,
+    current: string,
+    listIds: string[],
+    base: Set<string>
+  ) => {
+    const next = new Set(base);
+    for (const id of rangeIds(listIds, anchor, current)) next.add(id);
+    setSelectedIds((prev) => {
+      if (prev.size === next.size && [...next].every((id) => prev.has(id))) return prev;
+      return next;
+    });
+  };
+
+  const onListPointerDown = (e: React.PointerEvent<HTMLUListElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('button, a, input, textarea')) return;
+    // Text inside the transcript must stay selectable. preventDefault on
+    // pointerdown (and entrySelected during the drag) cancels the range.
+    if (target.closest('[data-transcript], pre')) {
+      // Let the browser keep the range. setState on pointerdown re-renders
+      // the Home tree and Chrome drops the selection before pointerup.
+      suppressTextCommitRef.current = false;
+      return;
+    }
+    const id = entryIdFromNode(target);
+    if (!id) return;
+    e.preventDefault();
+    suppressTextCommitRef.current = true;
+    textSpansRef.current = new Map();
+    window.getSelection()?.removeAllRanges();
+    selectionKindRef.current = 'cards';
+    setSelectionKind('cards');
+    const listIds = visibleIdsRef.current;
+    const additive = e.metaKey || e.ctrlKey;
+    const base = additive ? new Set(selectedIdsRef.current) : new Set<string>();
+    const anchor =
+      e.shiftKey && selectAnchorRef.current ? selectAnchorRef.current : id;
+    if (!e.shiftKey) selectAnchorRef.current = id;
+    dragSelectRef.current = { pointerId: e.pointerId, anchor, listIds, base };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    applyCardRange(anchor, id, listIds, base);
+  };
+
+  const onListPointerMove = (e: React.PointerEvent<HTMLUListElement>) => {
+    const drag = dragSelectRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    const id = entryIdAtPoint(e.clientX, e.clientY, drag.listIds);
+    if (!id) return;
+    applyCardRange(drag.anchor, id, drag.listIds, drag.base);
+  };
+
+  const onListPointerUp = (e: React.PointerEvent<HTMLUListElement>) => {
+    const drag = dragSelectRef.current;
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    dragSelectRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const idsMatch = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every((id) => set.has(id));
+  };
+
+  const removeEntries = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const drop = new Set(ids);
+    setEntries((prev) => prev.filter((entry) => !drop.has(entry.id)));
+    setSelectedIds((prev) => {
+      if (![...prev].some((id) => drop.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of drop) next.delete(id);
+      return next;
+    });
+    if (selectAnchorRef.current && drop.has(selectAnchorRef.current)) {
+      selectAnchorRef.current = null;
+    }
+    setAudioIds((prev) => {
+      if (![...prev].some((id) => drop.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of drop) next.delete(id);
+      return next;
+    });
+    setArmedDelete(null);
+    void deleteAudioSegments(ids).catch((err) =>
+      console.error('audio delete failed:', err)
+    );
+  };
+
+  const requestDelete = (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (armedDelete && idsMatch(armedDelete, ids)) {
+      removeEntries(ids);
+      return;
+    }
+    setArmedDelete(ids);
+  };
+
+  const assignSelectedBucket = (speakerId: number) => {
+    const ids = selectedIdsRef.current;
+    if (ids.size === 0) return;
+    const spans = textSpansRef.current;
+    let seq = 0;
+    setEntries((prev) =>
+      applySpeakerSplit(prev, ids, spans, speakerId, () => {
+        seq += 1;
+        return `${Date.now()}-${seq}-${Math.random().toString(36).slice(2, 8)}`;
+      })
+    );
+    setSelectedIds(new Set());
+    setSelectionKind('cards');
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    window.getSelection()?.removeAllRanges();
+  };
+
   const renderEntryCard = (entry: TranscriptEntry) => {
     const isSelf = entry.speakerId === 1;
     const isOther = entry.speakerId != null && entry.speakerId !== 1;
     const speakerTag = quietSpeakerTag(entry.speakerId, entry.source);
+    const selected = selectionKind === 'cards' && selectedIds.has(entry.id);
+    const tone = isSelf
+      ? `${styles.entry} ${styles.entrySelf}`
+      : isOther
+        ? `${styles.entry} ${styles.entryOther}`
+        : styles.entry;
     return (
       <li
         key={entry.id}
-        className={
-          isSelf
-            ? `${styles.entry} ${styles.entrySelf}`
-            : isOther
-              ? `${styles.entry} ${styles.entryOther}`
-              : styles.entry
-        }
+        data-entry-id={entry.id}
+        className={selected ? `${tone} ${styles.entrySelected}` : tone}
       >
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryMetaLead}>
-            <span className={styles.entryIndex}>#{entry.note}</span>
+            <span className={styles.entryIndex}>#{formatNote(entry.note)}</span>
             {speakerTag && (
               <span className={styles.entrySpeakerQuiet}>{speakerTag}</span>
             )}
@@ -1048,8 +1486,24 @@ export default function Home() {
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
+          <button
+            type="button"
+            className={
+              armedDelete?.length === 1 && armedDelete[0] === entry.id
+                ? `${styles.entryDelete} ${styles.entryDeleteArmed}`
+                : styles.entryDelete
+            }
+            aria-label={
+              armedDelete?.length === 1 && armedDelete[0] === entry.id
+                ? '削除を確定'
+                : 'この発言を削除'
+            }
+            onClick={() => requestDelete([entry.id])}
+          >
+            {armedDelete?.length === 1 && armedDelete[0] === entry.id ? '削除' : '×'}
+          </button>
         </div>
-        <pre className={styles.transcript}>{entry.text}</pre>
+        <pre className={styles.transcript} data-transcript="">{entry.text}</pre>
         {entry.textJa && (
           <div className={styles.translationBlock}>
             <div className={styles.translationLabel}>日本語訳（ローカル）</div>
@@ -1059,6 +1513,146 @@ export default function Home() {
       </li>
     );
   };
+
+  const renderAssignBar = () => {
+    if (selectedIds.size === 0) return null;
+    return (
+      <div className={styles.assignBar} role="toolbar" aria-label="選択した発言の話者">
+        <span className={styles.assignCount}>{selectedIds.size}件を</span>
+        {ASSIGN_BUCKETS.map((bucket) => (
+          <button
+            key={bucket.id}
+            type="button"
+            className={categoryButtonClass(bucket.id, false)}
+            onClick={() => assignSelectedBucket(bucket.speakerId)}
+          >
+            {bucket.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          className={
+            armedDelete && idsMatch(armedDelete, [...selectedIds])
+              ? `${styles.assignDelete} ${styles.assignDeleteArmed}`
+              : styles.assignDelete
+          }
+          onClick={() => requestDelete([...selectedIds])}
+        >
+          {armedDelete && idsMatch(armedDelete, [...selectedIds]) ? '削除する' : '削除'}
+        </button>
+        <button
+          type="button"
+          className={styles.assignClear}
+          onClick={() => {
+            setSelectedIds(new Set());
+            setSelectionKind('cards');
+            setArmedDelete(null);
+            selectAnchorRef.current = null;
+            textSpansRef.current = new Map();
+            window.getSelection()?.removeAllRanges();
+          }}
+        >
+          解除
+        </button>
+      </div>
+    );
+  };
+
+  const renderEntryList = (list: TranscriptEntry[]) => {
+    visibleIdsRef.current = list.map((entry) => entry.id);
+    return (
+      <>
+        <div className={styles.assignSlot}>
+          {selectedIds.size === 0 ? (
+            <p className={styles.assignHint}>
+              カードをドラッグ、または文字を選択して 自分 / セミナー / それ以外。文字の一部だけ選ぶと、その部分だけ別カードになります
+            </p>
+          ) : (
+            renderAssignBar()
+          )}
+        </div>
+        <ul
+          className={styles.entryList}
+          onPointerDown={onListPointerDown}
+          onPointerMove={onListPointerMove}
+          onPointerUp={onListPointerUp}
+          onPointerCancel={onListPointerUp}
+        >
+          {list.map(renderEntryCard)}
+        </ul>
+      </>
+    );
+  };
+
+  const renderFeedActions = () => (
+    <div className={styles.copyActionRow}>
+      {untranslatedEn.length > 0 && (
+        <button
+          type="button"
+          className={styles.ghostButton}
+          onClick={translateAllEnglish}
+          disabled={translatingIds.size > 0}
+        >
+          {translateConfigured
+            ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
+            : 'Ollamaで全て翻訳'}
+        </button>
+      )}
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copyAll}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__all__' ? 'コピー済み' : '全部コピー'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySeminarOnly}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__seminar__' ? 'コピー済み' : 'セミナーだけ'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySelfAndOthers}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__self__' ? 'コピー済み' : '自分＋その他'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
+        onClick={copySinceLast}
+        disabled={entries.length === 0}
+      >
+        {copiedId === '__since__' ? 'コピー済み' : '前回の続き'}
+      </button>
+      <button
+        type="button"
+        className={`${styles.ghostButton} ${styles.copyClusterTail}`}
+        onClick={downloadAllAudioZip}
+        disabled={audioIds.size === 0 || audioBusyId === '__all__'}
+      >
+        {audioBusyId === '__all__' ? 'ZIP準備中…' : '録音をまとめてダウンロード'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButtonDanger}
+        onClick={clearAll}
+        disabled={entries.length === 0 && !summary}
+      >
+        Clear
+      </button>
+      {copyHint ? (
+        <span className={styles.copyHint} role="status">
+          {copyHint}
+        </span>
+      ) : null}
+    </div>
+  );
 
   const renderNoteScreen = (
     title: string,
@@ -1087,23 +1681,6 @@ export default function Home() {
         </div>
       </header>
 
-      {(isRecording || isTranscribing) && (
-        <div className={styles.liveStrip} aria-live="polite">
-          {isRecording && (
-            <span className={styles.pillLive}>
-              <span className={styles.dotPulse} aria-hidden="true" />
-              Recording continues
-            </span>
-          )}
-          {isTranscribing && (
-            <span className={styles.pillQueue}>
-              <span className={styles.dotAmber} aria-hidden="true" />
-              Transcribing · {pendingCount}
-            </span>
-          )}
-        </div>
-      )}
-
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1122,46 +1699,7 @@ export default function Home() {
                 : `Showing ${list.length} · # stays chronological`}
             </p>
           </div>
-          <div className={styles.feedActions}>
-            {untranslatedEn.length > 0 && (
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={translateAllEnglish}
-                disabled={translatingIds.size > 0}
-              >
-                {translateConfigured
-                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
-                  : 'Ollamaで全て翻訳'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={copyAll}
-              disabled={entries.length === 0}
-            >
-              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={downloadAllAudioZip}
-              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
-            >
-              {audioBusyId === '__all__'
-                ? 'ZIP準備中…'
-                : '録音をまとめてダウンロード'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButtonDanger}
-              onClick={clearAll}
-              disabled={entries.length === 0 && !summary}
-            >
-              Clear
-            </button>
-          </div>
+          {renderFeedActions()}
         </div>
 
         {list.length === 0 ? (
@@ -1181,7 +1719,7 @@ export default function Home() {
             </button>
           </div>
         ) : (
-          <ul className={styles.entryList}>{list.map(renderEntryCard)}</ul>
+          renderEntryList(list)
         )}
       </section>
     </div>
@@ -1205,7 +1743,7 @@ export default function Home() {
 
   // Home = PR #6 polished control UI + compact Note entry points
   return (
-    <div className={styles.app}>
+    <div className={`${styles.app} ${styles.homeScreen}`}>
       <div className={styles.bgGlow} aria-hidden="true" />
 
       <header className={styles.topBar}>
@@ -1251,6 +1789,21 @@ export default function Home() {
           >
             Note 2 · 新しい順
           </button>
+        </div>
+        <div className={styles.statusGenreRow}>
+          <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
+            文脈
+          </label>
+          <input
+            id="meeting-genre-dock"
+            className={styles.genreInputCompact}
+            type="text"
+            value={genre}
+            onChange={(e) => setGenre(e.target.value)}
+            placeholder="ジャンル / 文脈"
+            aria-label="ジャンル / 文脈"
+            autoComplete="off"
+          />
         </div>
       </div>
 
@@ -1417,29 +1970,6 @@ export default function Home() {
             </button>
           </div>
 
-          <div className={styles.dockGroup} aria-live="polite">
-            <span className={styles.dockLabel}>Status</span>
-            <div className={styles.statusPills}>
-              {isRecording && (
-                <span className={styles.pillLive}>
-                  <span className={styles.dotPulse} aria-hidden="true" />
-                  Recording
-                </span>
-              )}
-              {isTranscribing && (
-                <span className={styles.pillQueue}>
-                  <span className={styles.dotAmber} aria-hidden="true" />
-                  Transcribing · {pendingCount}
-                </span>
-              )}
-              {!isRecording && !isTranscribing && (
-                <span className={styles.pillIdle}>
-                  <span className={styles.dotIdle} aria-hidden="true" />
-                  Idle
-                </span>
-              )}
-            </div>
-          </div>
         </div>
 
 
@@ -1513,6 +2043,10 @@ export default function Home() {
             </div>
 
             {speakerMode === 'manual' && (
+              <details className={styles.optionalSpeaker}>
+                <summary className={styles.optionalSpeakerSummary}>
+                  録音中に話者を切り替える（任意）
+                </summary>
               <div className={styles.activeSpeakerBar}>
                 <span className={styles.dockLabel}>
                   {isRecording ? 'いま話す人' : '次の話者'}
@@ -1562,6 +2096,7 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+              </details>
             )}
           </>
         )}
@@ -1577,46 +2112,7 @@ export default function Home() {
 
       <section className={styles.feed}>
         <div className={styles.feedToolbar}>
-          <div className={styles.feedActions}>
-            {untranslatedEn.length > 0 && (
-              <button
-                type="button"
-                className={styles.ghostButton}
-                onClick={translateAllEnglish}
-                disabled={translatingIds.size > 0}
-              >
-                {translateConfigured
-                  ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
-                  : 'Ollamaで全て翻訳'}
-              </button>
-            )}
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={copyAll}
-              disabled={entries.length === 0}
-            >
-              {copiedId === '__all__' ? 'コピー済み' : 'すべてコピー'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButton}
-              onClick={downloadAllAudioZip}
-              disabled={audioIds.size === 0 || audioBusyId === '__all__'}
-            >
-              {audioBusyId === '__all__'
-                ? 'ZIP準備中…'
-                : '録音をまとめてダウンロード'}
-            </button>
-            <button
-              type="button"
-              className={styles.ghostButtonDanger}
-              onClick={clearAll}
-              disabled={entries.length === 0 && !summary}
-            >
-              Clear
-            </button>
-          </div>
+          {renderFeedActions()}
         </div>
 
         {entries.length === 0 ? (
@@ -1632,9 +2128,7 @@ export default function Home() {
             </p>
           </div>
         ) : (
-          <ul className={styles.entryList}>
-            {note2Entries.map(renderEntryCard)}
-          </ul>
+          renderEntryList(homeEntries)
         )}
       </section>
     </div>

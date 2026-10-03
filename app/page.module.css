@@ -259,78 +259,6 @@
   }
 }
 
-.statusPills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.pillLive,
-.pillQueue,
-.pillIdle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-height: 32px;
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.pillLive {
-  color: #fecaca;
-  border-color: rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.12);
-}
-
-.pillQueue {
-  color: #fde68a;
-  border-color: rgba(251, 191, 36, 0.35);
-  background: rgba(251, 191, 36, 0.1);
-}
-
-.pillIdle {
-  color: var(--muted);
-}
-
-.dotPulse,
-.dotAmber,
-.dotIdle {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.dotPulse {
-  background: var(--danger);
-  box-shadow: 0 0 0 0 rgba(255, 92, 122, 0.6);
-  animation: dotBeat 1.2s ease-out infinite;
-}
-
-.dotAmber {
-  background: var(--warn);
-}
-
-.dotIdle {
-  background: #64748b;
-}
-
-@keyframes dotBeat {
-  0% {
-    box-shadow: 0 0 0 0 rgba(255, 92, 122, 0.55);
-  }
-  70% {
-    box-shadow: 0 0 0 8px rgba(255, 92, 122, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(255, 92, 122, 0);
-  }
-}
-
 .error {
   margin: 0.85rem 0 0;
   padding: 0.75rem 0.9rem;
@@ -350,10 +278,16 @@
 
 .feedHeader {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.feedHeader > div:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .feedTitle {
@@ -373,6 +307,41 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+
+/* Transcript copy controls stay on one row: new filters left, download/Clear right. */
+.copyActionRow {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.28rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.copyActionRow .ghostButton,
+.copyActionRow .ghostButtonDanger {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0.12rem 0.4rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.copyClusterTail {
+  margin-left: 0.2rem;
+}
+
+.copyHint {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--warn);
 }
 
 .ghostButton,
@@ -474,6 +443,9 @@
 }
 
 .entry {
+  cursor: pointer;
+  /* Card chrome is for drag-select. Transcript opts back in so a text range works. */
+  user-select: none;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1rem;
@@ -494,13 +466,46 @@
   box-shadow: inset 5px 0 0 #64748b, 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
+.entrySelected {
+  outline: 2px solid rgba(167, 139, 250, 0.95);
+  outline-offset: 2px;
+}
+
 .entryMetaMinimal {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.65rem;
   margin-bottom: 0.45rem;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.entryDelete {
+  margin-left: auto;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  cursor: pointer;
+  opacity: 0.45;
+}
+
+.entry:hover .entryDelete,
+.entryDelete:focus-visible {
+  opacity: 0.85;
+}
+
+.entryDeleteArmed {
+  opacity: 1;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
 }
 
 .entryMetaLead {
@@ -565,6 +570,9 @@
 
 .transcript,
 .transcriptJa {
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
@@ -612,8 +620,7 @@
     order: -1;
   }
 
-  .langToggle,
-  .statusPills {
+  .langToggle {
     width: 100%;
   }
 
@@ -634,6 +641,17 @@
   .ghostButton,
   .ghostButtonDanger {
     flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .copyActionRow {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .copyActionRow .ghostButton,
+  .copyActionRow .ghostButtonDanger {
+    flex: 0 0 auto;
     text-align: center;
   }
 }
@@ -681,13 +699,6 @@
 
 .noteHeading {
   flex: 1 1 12rem;
-}
-
-.liveStrip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  margin-bottom: 1rem;
 }
 
 .homePreview {
@@ -808,18 +819,26 @@
   position: relative;
   z-index: 1;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.65rem 1rem;
+  gap: 0.55rem 0.75rem;
   margin: 0 0 1rem;
-  padding: 0.65rem 0;
+  padding: 0.35rem 0;
   border-radius: 0;
   border: none;
   background: transparent;
+  min-width: 0;
+}
+
+.noteEntryBar .statusGenreRow {
+  flex: 1 1 auto;
+  margin-top: 0;
+  min-width: 0;
 }
 
 .noteEntryButtons {
   display: flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 0.45rem;
 }
@@ -851,6 +870,10 @@
 }
 
 @media (max-width: 760px) {
+  .noteEntryBar {
+    flex-wrap: wrap;
+  }
+
   .noteEntryButtons {
     width: 100%;
   }
@@ -858,6 +881,10 @@
   .noteEntryButton {
     flex: 1 1 auto;
     text-align: center;
+  }
+
+  .noteEntryBar .statusGenreRow {
+    flex: 1 1 100%;
   }
 }
 
@@ -999,8 +1026,21 @@
 
 .feedToolbar {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
   margin-bottom: 0.85rem;
+  min-width: 0;
+}
+
+.feedToolbar .copyActionRow {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.feedToolbar .statusGenreRow {
+  margin-top: 0;
+  width: 100%;
 }
 
 .summaryBody {
@@ -1400,6 +1440,38 @@
   white-space: nowrap;
 }
 
+/* Live picker: セミナー / 自分 / それ以外 stay much larger than 発言者A–G.
+   (0, 3, 0) beats the compact one-row sizes on .category* (0, 1, 0):
+   font-size 0.72rem, min-height 32px, padding 0.18rem 0.42rem, min-width 0.
+   Nothing later in this file resets these size properties. */
+.activeSpeakerBar .speakerPicker .categorySelf,
+.activeSpeakerBar .speakerPicker .categorySelfActive,
+.activeSpeakerBar .speakerPicker .categorySeminar,
+.activeSpeakerBar .speakerPicker .categorySeminarActive,
+.activeSpeakerBar .speakerPicker .categoryOther,
+.activeSpeakerBar .speakerPicker .categoryOtherActive {
+  font-size: 1.7rem;
+  font-weight: 800;
+  line-height: 1.15;
+  min-height: 84px;
+  min-width: max-content;
+  flex: 0 0 auto;
+  padding: 1rem 1.6rem;
+  border-radius: 16px;
+  border-width: 2px;
+}
+
+.speakerPicker .letterRoleButton,
+.speakerPicker .letterRoleSelfActive,
+.speakerPicker .letterRoleSeminarActive,
+.speakerPicker .letterRoleOtherActive {
+  font-size: 0.65rem;
+  font-weight: 600;
+  min-height: 24px;
+  padding: 0.05rem 0.32rem;
+  border-radius: 7px;
+}
+
 .categorySelf,
 .categorySelfActive {
   border-color: rgba(52, 211, 153, 0.65);
@@ -1477,12 +1549,135 @@
   font-weight: 700;
 }
 
+/* Compact genre/context beside the Note buttons. */
+.statusGenreRow {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.4rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.genreInlineLabel {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Compact genre/context: stays on the Note row, never wraps to a second line. */
+.genreInputCompact {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  height: 32px;
+  min-height: 32px;
+  max-height: 32px;
+  padding: 0 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.genreInputCompact::placeholder {
+  color: #64748b;
+}
+
+.genreInputCompact:focus {
+  outline: 2px solid #5b8cff;
+  outline-offset: 1px;
+}
+
 .speakerModeBar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.55rem 0.75rem;
   margin-top: 0.85rem;
+}
+
+.assignSlot {
+  min-height: 48px;
+  margin: 0 0 0.65rem;
+  display: flex;
+  align-items: center;
+}
+
+.assignBar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  width: 100%;
+  overflow-x: auto;
+}
+
+.assignDelete {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 0.45rem;
+  min-height: 32px;
+  border-radius: 999px;
+}
+
+.assignDeleteArmed {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.assignCount,
+.assignHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.assignHint {
+  margin: 0;
+}
+
+.assignClear {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 0.2rem;
+  min-height: 32px;
+}
+
+.optionalSpeaker {
+  margin-top: 0.45rem;
+}
+
+.optionalSpeakerSummary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.optionalSpeaker[open] .optionalSpeakerSummary {
+  margin-bottom: 0.35rem;
 }
 
 .diarizeHint {
@@ -1500,8 +1695,24 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .recordButtonActive,
-  .dotPulse {
+  .recordButtonActive {
     animation: none;
   }
+}
+
+/* Home: the control dock and summary chip must not stick over transcript
+   cards. A covering layer eats the quiet × and the speaker toolbar.
+   The assign row sticks on its own so 自分 / セミナー / それ以外 stay in reach. */
+.homeScreen .controlDock,
+.homeScreen .summaryToggleRow {
+  position: static;
+}
+
+.homeScreen .assignSlot {
+  position: sticky;
+  top: 0.4rem;
+  z-index: 6;
+  margin-bottom: 0.65rem;
+  padding: 0.35rem 0;
+  background: rgba(7, 9, 15, 0.94);
 }

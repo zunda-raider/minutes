@@ -25,7 +25,17 @@ export type RecordingSource = 'mic' | 'system';
 export const ZOOM_CATEGORIES = [
   { id: 'seminar', label: 'セミナー', speakerId: 2 },
   { id: 'self', label: '自分', speakerId: 1 },
-  { id: 'other', label: 'その他', speakerId: 3 },
+  { id: 'other', label: 'それ以外', speakerId: 3 },
+] as const;
+
+/**
+ * Post-hoc buckets. 自分 → A, セミナー → B, それ以外 → C.
+ * Display order for the selection toolbar (not the optional live picker).
+ */
+export const ASSIGN_BUCKETS = [
+  { id: 'self', label: '自分', speakerId: 1 },
+  { id: 'seminar', label: 'セミナー', speakerId: 2 },
+  { id: 'other', label: 'それ以外', speakerId: 3 },
 ] as const;
 
 export type ZoomCategoryId = (typeof ZOOM_CATEGORIES)[number]['id'];
@@ -44,20 +54,20 @@ export function zoomCategoryForSpeaker(
 
 /**
  * Letter-button caption.
- * A 自分, B セミナー, C その他. D–G are bare letters (no role in parentheses).
+ * A 自分, B セミナー, C それ以外. D–G are bare letters (no role in parentheses).
  */
 export function zoomLetterButtonLabel(speakerId: number): string {
   const letter = letterForSpeakerId(speakerId);
   if (speakerId === 1) return `発言者${letter}（自分）`;
   if (speakerId === 2) return `発言者${letter}（セミナー）`;
-  if (speakerId === 3) return `発言者${letter}（その他）`;
+  if (speakerId === 3) return `発言者${letter}（それ以外）`;
   return `発言者${letter}`;
 }
 
 /**
  * Quiet card-meta label. null means omit the word (unset / unknown speaker).
  * Zoom A and mic メイン (id 1) → 自分. Zoom B → セミナー.
- * Zoom C–G stay as the letter so multiple others stay distinguishable.
+ * Zoom C (それ以外 bucket) → それ以外. D–G stay as the letter.
  * Mic 質問者 only when the segment was recorded in mic mode.
  */
 export function quietSpeakerTag(
@@ -74,6 +84,7 @@ export function quietSpeakerTag(
   }
   if (speakerId === 1) return '自分';
   if (speakerId === 2) return 'セミナー';
+  if (speakerId === 3) return 'それ以外';
   if (speakerId > MAX_SPEAKERS) return null;
   return letterForSpeakerId(speakerId);
 }
