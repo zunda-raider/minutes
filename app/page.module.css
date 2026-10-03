@@ -1641,16 +1641,11 @@
   border-color: rgba(248, 113, 113, 0.35);
 }
 
-.assignCount,
-.assignHint {
+.assignCount {
   margin: 0;
   color: var(--muted);
   font-size: 0.75rem;
   line-height: 1.35;
-}
-
-.assignHint {
-  margin: 0;
 }
 
 .assignClear {

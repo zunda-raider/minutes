@@ -230,6 +230,8 @@ export default function Home() {
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
+  /** Stub flag for future GD (group discussion) mode UI/flow. */
+  const [gdMode, setGdMode] = useState(false);
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
@@ -1562,15 +1564,9 @@ export default function Home() {
     visibleIdsRef.current = list.map((entry) => entry.id);
     return (
       <>
-        <div className={styles.assignSlot}>
-          {selectedIds.size === 0 ? (
-            <p className={styles.assignHint}>
-              カードをドラッグ、または文字を選択して 自分 / セミナー / それ以外。文字の一部だけ選ぶと、その部分だけ別カードになります
-            </p>
-          ) : (
-            renderAssignBar()
-          )}
-        </div>
+        {selectedIds.size > 0 && (
+          <div className={styles.assignSlot}>{renderAssignBar()}</div>
+        )}
         <ul
           className={styles.entryList}
           onPointerDown={onListPointerDown}
@@ -2030,6 +2026,15 @@ export default function Home() {
                   自動
                 </button>
               </div>
+              <button
+                type="button"
+                className={gdMode ? styles.langButtonActive : styles.langButton}
+                aria-pressed={gdMode}
+                aria-label="GDモード"
+                onClick={() => setGdMode((on) => !on)}
+              >
+                GDモード
+              </button>
               {speakerMode === 'auto' && (
                 <button
                   type="button"
