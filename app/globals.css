@@ -6,7 +6,9 @@
 html,
 body {
   max-width: 100vw;
-  overflow-x: hidden;
+  /* clip, not hidden: hidden turns the other axis into a scroll container
+     and position:sticky (Home assign bar) never engages. */
+  overflow-x: clip;
 }
 
 body {
