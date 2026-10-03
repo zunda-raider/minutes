@@ -15,6 +15,45 @@ export function stripTimestamps(raw: string): string {
     .trim();
 }
 
+const WHISPER_TS =
+  /\[(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})\.(\d{3})\]/;
+
+export type WhisperSegment = {
+  text: string;
+  startSec: number;
+  endSec: number;
+};
+
+function whisperClockToSec(h: string, m: string, s: string, ms: string): number {
+  return (
+    Number(h) * 3600 + Number(m) * 60 + Number(s) + Number(ms) / 1000
+  );
+}
+
+/**
+ * Timestamped whisper-cli lines. Speaker marks are stripped so the caller
+ * can label 自分 / それ以外 from audio energy instead.
+ */
+export function parseWhisperSegments(raw: string): WhisperSegment[] {
+  const out: WhisperSegment[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const m = line.match(WHISPER_TS);
+    if (!m) continue;
+    const startSec = whisperClockToSec(m[1]!, m[2]!, m[3]!, m[4]!);
+    const endSec = whisperClockToSec(m[5]!, m[6]!, m[7]!, m[8]!);
+    if (!(endSec > startSec)) continue;
+    let body = stripTimestamps(line);
+    body = body
+      .replace(/^\(?\s*speaker\s*[#:]?\s*(\d+|\?)\s*\)?\s*[:：-]?\s*/i, '')
+      .replace(/^speaker\s*\d+\s*[:：]\s*/i, '')
+      .replace(/\s*\[(?:SPEAKER_TURN|_SOLM_)\]\s*$/i, '')
+      .trim();
+    if (!body) continue;
+    out.push({ text: body, startSec, endSec });
+  }
+  return out;
+}
+
 /**
  * Parse tinydiarize [SPEAKER_TURN] and (speaker N) style tags into turns.
  */

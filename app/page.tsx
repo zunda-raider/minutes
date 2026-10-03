@@ -42,6 +42,11 @@ import {
   type PitchCentroid,
 } from '@/lib/pitch-diarize';
 import {
+  speakersFromMicEnergy,
+  type EnergyWindow,
+} from '@/lib/self-energy';
+import type { WhisperSegment } from '@/lib/diarize-parse';
+import {
   clearAllAudio,
   deleteAudioSegments,
   filenameForSegment,
@@ -236,6 +241,8 @@ export default function Home() {
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
   /** Active speaker while recording (Zoom A–G or mic role). Optional; sort afterward. */
   const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
+  /** Set when Zoom mic permission is denied; energy tagging stays off. */
+  const [selfMicNote, setSelfMicNote] = useState('');
   /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   /** Ids waiting for a second click to confirm delete. */
@@ -267,6 +274,11 @@ export default function Home() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  /** Parallel mic used only in Zoom/system mode, for 自分 energy — not STT. */
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micRecorderRef = useRef<MediaRecorder | null>(null);
+  /** User picked a Zoom speaker during the current segment (overrides energy). */
+  const segmentManualRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef('audio/webm');
   const langRef = useRef(lang);
@@ -281,6 +293,10 @@ export default function Home() {
     /** Speaker selected when the segment was cut */
     speakerId: number | null;
     source: AudioSource;
+    /** Parallel mic capture. Zoom/system only; never set for mic-only jobs. */
+    micBlob?: Blob | null;
+    /** True when the user changed the Zoom picker during this segment. */
+    manualLock?: boolean;
   };
   const uploadQueueRef = useRef<UploadJob[]>([]);
   const queueRunningRef = useRef(false);
@@ -330,6 +346,7 @@ export default function Home() {
     return () => {
       if (segmentTimerRef.current) clearInterval(segmentTimerRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -424,6 +441,17 @@ export default function Home() {
   const stopTracks = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    micStreamRef.current?.getTracks().forEach((track) => track.stop());
+    micStreamRef.current = null;
+    const micRec = micRecorderRef.current;
+    micRecorderRef.current = null;
+    if (micRec && micRec.state !== 'inactive') {
+      try {
+        micRec.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
   };
 
   const clearSegmentTimer = () => {
@@ -458,6 +486,7 @@ export default function Home() {
           error?: string;
           lang?: string;
           turns?: DiarizeTurn[];
+          segments?: WhisperSegment[];
           hasDiarizeMarks?: boolean;
           diarize?: {
             requested?: boolean;
@@ -499,7 +528,31 @@ export default function Home() {
 
         let chunks: Array<{ speaker?: number; text: string }> = [];
 
-        if (mode === 'auto' && hasWhisperDiarize) {
+        const useMicEnergy =
+          job.source === 'system' &&
+          !job.manualLock &&
+          job.micBlob != null &&
+          job.micBlob.size > 0 &&
+          text.length > 0;
+
+        if (useMicEnergy) {
+          // Zoom only: mic RMS vs system RMS inside each whisper window.
+          // Mic-only jobs never carry micBlob, so they stay on the manual role.
+          try {
+            const timed: EnergyWindow[] =
+              data.segments && data.segments.length > 0
+                ? data.segments
+                : [{ text, startSec: 0, endSec: Number.POSITIVE_INFINITY }];
+            const tagged = await speakersFromMicEnergy(blob, job.micBlob!, timed);
+            chunks = tagged.map((row) => ({
+              text: row.text,
+              speaker: row.speakerId,
+            }));
+          } catch (energyErr) {
+            console.warn('mic energy self-tag failed:', energyErr);
+            chunks = [{ text, speaker: undefined }];
+          }
+        } else if (mode === 'auto' && hasWhisperDiarize) {
           const { turns, lastSpeaker } = remapSpeakersContinuity(
             data.turns!,
             lastSpeakerRef.current
@@ -609,12 +662,19 @@ export default function Home() {
   }, []);
 
   const enqueueTranscribe = useCallback(
-    (blob: Blob) => {
+    (
+      blob: Blob,
+      extra?: { micBlob?: Blob | null; manualLock?: boolean }
+    ) => {
       if (blob.size === 0) return;
+      const source = audioSourceRef.current;
       uploadQueueRef.current.push({
         blob,
         speakerId: activeSpeakerRef.current,
-        source: audioSourceRef.current,
+        source,
+        // Energy comparison is Zoom/system only.
+        micBlob: source === 'system' ? extra?.micBlob ?? null : null,
+        manualLock: source === 'system' ? Boolean(extra?.manualLock) : false,
       });
       setPendingCount((n) => n + 1);
       void processQueue();
@@ -629,6 +689,58 @@ export default function Home() {
     const mimeType = mimeTypeRef.current;
     chunksRef.current = [];
     const recorder = new MediaRecorder(stream, { mimeType });
+
+    const micStream = micStreamRef.current;
+    let micRecorder: MediaRecorder | null = null;
+    const micChunks: Blob[] = [];
+    const micLive =
+      micStream != null &&
+      audioSourceRef.current === 'system' &&
+      micStream.getAudioTracks().some((t) => t.readyState === 'live');
+    if (micLive && micStream) {
+      try {
+        micRecorder = new MediaRecorder(micStream, { mimeType });
+        micRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) micChunks.push(e.data);
+        };
+      } catch (err) {
+        console.warn('self mic recorder failed:', err);
+        micRecorder = null;
+      }
+    }
+    micRecorderRef.current = micRecorder;
+    segmentManualRef.current = false;
+
+    let systemBlob: Blob | null = null;
+    let micBlob: Blob | null = null;
+    let systemDone = false;
+    let micDone = micRecorder == null;
+    let settled = false;
+
+    const finishSegment = () => {
+      if (!systemDone || !micDone || settled) return;
+      settled = true;
+      mediaRecorderRef.current = null;
+      micRecorderRef.current = null;
+      const manualLock = segmentManualRef.current;
+      if (systemBlob && systemBlob.size > 0) {
+        enqueueTranscribe(systemBlob, {
+          micBlob: manualLock ? null : micBlob,
+          manualLock,
+        });
+      }
+
+      if (wantRecordingRef.current && rotateAfterStopRef.current && streamRef.current) {
+        rotateAfterStopRef.current = false;
+        startRecorderOnStream();
+        return;
+      }
+
+      if (!wantRecordingRef.current) {
+        stopTracks();
+        setIsRecording(false);
+      }
+    };
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
@@ -645,28 +757,46 @@ export default function Home() {
     };
 
     recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: mimeType });
+      systemBlob = new Blob(chunksRef.current, { type: mimeType });
       chunksRef.current = [];
-      mediaRecorderRef.current = null;
-
-      if (blob.size > 0) {
-        enqueueTranscribe(blob);
+      systemDone = true;
+      if (micRecorder && micRecorder.state === 'recording') {
+        try {
+          micRecorder.stop();
+        } catch {
+          micDone = true;
+        }
+      } else if (!micDone) {
+        micDone = true;
       }
-
-      if (wantRecordingRef.current && rotateAfterStopRef.current && streamRef.current) {
-        rotateAfterStopRef.current = false;
-        startRecorderOnStream();
-        return;
-      }
-
-      if (!wantRecordingRef.current) {
-        stopTracks();
-        setIsRecording(false);
-      }
+      finishSegment();
     };
+
+    if (micRecorder) {
+      micRecorder.onstop = () => {
+        micBlob = micChunks.length > 0 ? new Blob(micChunks, { type: mimeType }) : null;
+        micDone = true;
+        finishSegment();
+      };
+      micRecorder.onerror = () => {
+        console.warn('self mic recorder error; continuing without auto 自分');
+        micBlob = null;
+        micDone = true;
+        finishSegment();
+      };
+    }
 
     recorder.start(1000);
     mediaRecorderRef.current = recorder;
+    if (micRecorder && micRecorder.state === 'inactive') {
+      try {
+        micRecorder.start(1000);
+      } catch (err) {
+        console.warn('self mic start failed:', err);
+        micRecorderRef.current = null;
+        micDone = true;
+      }
+    }
   }, [enqueueTranscribe]);
 
   const rotateSegment = useCallback(() => {
@@ -676,6 +806,22 @@ export default function Home() {
     rotateAfterStopRef.current = true;
     recorder.stop();
   }, []);
+
+  const openSelfMic = async (): Promise<MediaStream | null> => {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      });
+    } catch (err) {
+      console.warn('self mic unavailable:', err);
+      return null;
+    }
+  };
 
   const acquireAudioStream = async (
     source: AudioSource
@@ -709,9 +855,13 @@ export default function Home() {
     setError('');
 
     let stream: MediaStream;
+    const wantSelfMic = audioSource === 'system';
+    const selfMicPromise = wantSelfMic ? openSelfMic() : Promise.resolve(null);
     try {
       stream = await acquireAudioStream(audioSource);
     } catch (e) {
+      const leftover = await selfMicPromise;
+      leftover?.getTracks().forEach((track) => track.stop());
       const err = e as DOMException | Error;
       console.error('音声ソース取得エラー:', err);
       if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
@@ -734,6 +884,23 @@ export default function Home() {
       return;
     }
 
+    const selfMic = await selfMicPromise;
+    if (wantSelfMic) {
+      if (selfMic) {
+        micStreamRef.current = selfMic;
+        setSelfMicNote('');
+      } else {
+        micStreamRef.current = null;
+        setSelfMicNote(
+          'マイクが使えないため、「自分」の自動判定はオフです。'
+        );
+      }
+    } else {
+      selfMic?.getTracks().forEach((track) => track.stop());
+      micStreamRef.current = null;
+      setSelfMicNote('');
+    }
+
     streamRef.current = stream;
     mimeTypeRef.current = pickMimeType();
     wantRecordingRef.current = true;
@@ -745,6 +912,14 @@ export default function Home() {
         wantRecordingRef.current = false;
         rotateAfterStopRef.current = false;
         clearSegmentTimer();
+        const micRec = micRecorderRef.current;
+        if (micRec && micRec.state !== 'inactive') {
+          try {
+            micRec.stop();
+          } catch {
+            /* ignore */
+          }
+        }
         const recorder = mediaRecorderRef.current;
         if (recorder && recorder.state !== 'inactive') {
           recorder.stop();
@@ -808,6 +983,13 @@ export default function Home() {
       setError('クリップボードへのコピーに失敗しました。');
       return false;
     }
+  };
+
+  const chooseZoomSpeaker = (id: number) => {
+    if (audioSourceRef.current === 'system') {
+      segmentManualRef.current = true;
+    }
+    setActiveSpeakerId(id);
   };
 
   const speakerDisplayName = (speakerId?: number) => {
@@ -1956,6 +2138,12 @@ export default function Home() {
                 Zoom・LINE・他
               </button>
             </div>
+            {audioSource === 'system' && (
+              <p className={styles.genreHint}>
+                Zoomモードはマイクの音量で「自分」を付けます（文字起こしは共有音声のまま）。
+                {selfMicNote ? ` ${selfMicNote}` : ''}
+              </p>
+            )}
           </div>
 
           <div className={styles.dockGroup}>
@@ -2098,7 +2286,7 @@ export default function Home() {
                           type="button"
                           className={categoryButtonClass(cat.id, active)}
                           aria-pressed={active}
-                          onClick={() => setActiveSpeakerId(cat.speakerId)}
+                          onClick={() => chooseZoomSpeaker(cat.speakerId)}
                         >
                           {cat.label}
                         </button>
@@ -2119,7 +2307,7 @@ export default function Home() {
                           type="button"
                           className={letterRoleClass(id, active)}
                           aria-pressed={active}
-                          onClick={() => setActiveSpeakerId(id)}
+                          onClick={() => chooseZoomSpeaker(id)}
                         >
                           {zoomLetterButtonLabel(id)}
                         </button>
