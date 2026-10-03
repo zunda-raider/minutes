@@ -21,7 +21,6 @@ import {
 } from '@/lib/history-storage';
 import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
-  defaultSpeakerLabel,
   letterForSpeakerId,
   SPEAKER_LETTERS,
 } from '@/lib/speaker-letters';
@@ -659,7 +658,10 @@ export default function Home() {
     const mic = micRoleLabel(speakerId);
     // Prefer mic role names when those ids were used as mic roles (no custom rename)
     if (mic && audioSource === 'mic') return mic;
-    return defaultSpeakerLabel(speakerId);
+    const letter = letterForSpeakerId(speakerId);
+    // Zoom slot A is the local participant ("自分")
+    if (speakerId === 1) return `発言者${letter}（自分）`;
+    return `発言者${letter}`;
   };
 
   const formatEntryForCopy = (e: TranscriptEntry) => {
@@ -997,10 +999,28 @@ export default function Home() {
 
 
   const renderEntryCard = (entry: TranscriptEntry) => {
+    const isSelf = entry.speakerId === 1;
+    const isOther = entry.speakerId != null && entry.speakerId !== 1;
     return (
-      <li key={entry.id} className={styles.entry}>
+      <li
+        key={entry.id}
+        className={
+          isSelf
+            ? `${styles.entry} ${styles.entrySelf}`
+            : isOther
+              ? `${styles.entry} ${styles.entryOther}`
+              : styles.entry
+        }
+      >
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryIndex}>#{entry.note}</span>
+          {entry.speakerId != null && (
+            <span
+              className={isSelf ? styles.speakerTagSelf : styles.speakerTagOther}
+            >
+              {speakerDisplayName(entry.speakerId)}
+            </span>
+          )}
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
@@ -1485,14 +1505,18 @@ export default function Home() {
                         key={letter}
                         type="button"
                         className={
-                          activeSpeakerId === id
-                            ? styles.letterButtonActive
-                            : styles.letterButton
+                          id === 1
+                            ? activeSpeakerId === id
+                              ? styles.letterButtonSelfActive
+                              : styles.letterButtonSelf
+                            : activeSpeakerId === id
+                              ? styles.letterButtonOtherActive
+                              : styles.letterButtonOther
                         }
                         aria-pressed={activeSpeakerId === id}
                         onClick={() => setActiveSpeakerId(id)}
                       >
-                        {letterForSpeakerId(id)}
+                        {speakerDisplayName(id)}
                       </button>
                     );
                   })}
