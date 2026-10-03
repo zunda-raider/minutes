@@ -1699,3 +1699,20 @@
     animation: none;
   }
 }
+
+/* Home: the control dock and summary chip must not stick over transcript
+   cards. A covering layer eats the quiet × and the speaker toolbar.
+   The assign row sticks on its own so 自分 / セミナー / それ以外 stay in reach. */
+.homeScreen .controlDock,
+.homeScreen .summaryToggleRow {
+  position: static;
+}
+
+.homeScreen .assignSlot {
+  position: sticky;
+  top: 0.4rem;
+  z-index: 6;
+  margin-bottom: 0.65rem;
+  padding: 0.35rem 0;
+  background: rgba(7, 9, 15, 0.94);
+}

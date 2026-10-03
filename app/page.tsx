@@ -33,6 +33,7 @@ import {
   type ZoomCategoryId,
 } from '@/lib/speaker-letters';
 import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
+import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -944,6 +945,8 @@ export default function Home() {
 
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
+  // Home only: newer segments on top, split pieces of one segment still read downward.
+  const homeEntries = newestFirstReadingOrder(entries);
 
   const clearAll = () => {
     setEntries([]);
@@ -1243,7 +1246,7 @@ export default function Home() {
 
   const commitTextSelection = () => {
     const read = readTextSelection();
-    if (!read) return;
+    if (!read) return false;
     textSpansRef.current = read.spans;
     selectAnchorRef.current = read.hits[0] ?? null;
     const next = new Set(read.hits);
@@ -1254,6 +1257,17 @@ export default function Home() {
       if (prev.size === next.size && read.hits.every((id) => prev.has(id))) return prev;
       return next;
     });
+    return true;
+  };
+
+  const clearCardSelection = () => {
+    if (selectedIdsRef.current.size === 0 && selectionKindRef.current === 'cards') return;
+    selectedIdsRef.current = new Set();
+    selectionKindRef.current = 'cards';
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    setSelectionKind('cards');
+    setSelectedIds(new Set());
   };
 
   useEffect(() => {
@@ -1268,13 +1282,22 @@ export default function Home() {
       selectedIdsRef.current = new Set(read.hits);
     };
     const onPointerUp = (e: PointerEvent) => {
-      if (e.button !== 0) return;
+      // Chrome fires pointercancel instead of pointerup when a re-render
+      // moves the card mid-drag. Still commit, or the Home toolbar never appears.
+      if (e.type !== 'pointercancel' && e.button !== 0) return;
       if (suppressTextCommitRef.current) {
         suppressTextCommitRef.current = false;
         return;
       }
       if (dragSelectRef.current) return;
-      commitTextSelection();
+      if (commitTextSelection()) return;
+      // Clicking transcript text with no range used to clear a card selection
+      // on pointerdown. Do it after pointerup so the drag is not re-rendered.
+      if (e.type === 'pointercancel') return;
+      const target = e.target;
+      if (!(target instanceof Element) || !target.closest('[data-transcript], pre')) return;
+      if (selectedIdsRef.current.size === 0) return;
+      clearCardSelection();
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'Shift') return;
@@ -1285,10 +1308,12 @@ export default function Home() {
     };
     document.addEventListener('selectionchange', onSelectionChange);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
     window.addEventListener('keyup', onKeyUp);
     return () => {
       document.removeEventListener('selectionchange', onSelectionChange);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
       window.removeEventListener('keyup', onKeyUp);
     };
   }, []);
@@ -1335,15 +1360,9 @@ export default function Home() {
     // Text inside the transcript must stay selectable. preventDefault on
     // pointerdown (and entrySelected during the drag) cancels the range.
     if (target.closest('[data-transcript], pre')) {
+      // Let the browser keep the range. setState on pointerdown re-renders
+      // the Home tree and Chrome drops the selection before pointerup.
       suppressTextCommitRef.current = false;
-      if (selectionKindRef.current !== 'text') {
-        selectionKindRef.current = 'text';
-        setSelectionKind('text');
-      }
-      if (selectedIdsRef.current.size > 0) {
-        selectedIdsRef.current = new Set();
-        setSelectedIds(new Set());
-      }
       return;
     }
     const id = entryIdFromNode(target);
@@ -1724,7 +1743,7 @@ export default function Home() {
 
   // Home = PR #6 polished control UI + compact Note entry points
   return (
-    <div className={styles.app}>
+    <div className={`${styles.app} ${styles.homeScreen}`}>
       <div className={styles.bgGlow} aria-hidden="true" />
 
       <header className={styles.topBar}>
@@ -2109,7 +2128,7 @@ export default function Home() {
             </p>
           </div>
         ) : (
-          renderEntryList(note2Entries)
+          renderEntryList(homeEntries)
         )}
       </section>
     </div>
