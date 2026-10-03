@@ -41,6 +41,7 @@ import {
 } from '@/lib/pitch-diarize';
 import {
   clearAllAudio,
+  deleteAudioSegments,
   filenameForSegment,
   getAudioSegment,
   listAudioIds,
@@ -169,6 +170,8 @@ export default function Home() {
   const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
   /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  /** Ids waiting for a second click to confirm delete. */
+  const [armedDelete, setArmedDelete] = useState<string[] | null>(null);
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
   const selectAnchorRef = useRef<string | null>(null);
@@ -201,6 +204,7 @@ export default function Home() {
   };
   const uploadQueueRef = useRef<UploadJob[]>([]);
   const queueRunningRef = useRef(false);
+  /** Highest note number issued. Not a length, so deletes keep gaps. */
   const entriesLenRef = useRef(0);
   const lastSpeakerRef = useRef<number | null>(null);
   const speakerModeRef = useRef<SpeakerMode>('manual');
@@ -266,7 +270,8 @@ export default function Home() {
 
   // Persist on every change after hydrate (including clear → [])
   useEffect(() => {
-    entriesLenRef.current = entries.length;
+    const maxNote = entries.reduce((max, entry) => Math.max(max, entry.note), 0);
+    if (maxNote > entriesLenRef.current) entriesLenRef.current = maxNote;
   }, [entries]);
 
   useEffect(() => {
@@ -862,11 +867,13 @@ export default function Home() {
 
   const clearAll = () => {
     setEntries([]);
+    entriesLenRef.current = 0;
     setSummary('');
     setCopiedId(null);
     setAudioIds(new Set());
     setSpeakerLabels({});
     setSelectedIds(new Set());
+    setArmedDelete(null);
     selectAnchorRef.current = null;
     lastSpeakerRef.current = null;
     pitchCentroidsRef.current = [];
@@ -1142,6 +1149,7 @@ export default function Home() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setSelectedIds(new Set());
+        setArmedDelete(null);
         selectAnchorRef.current = null;
       }
     };
@@ -1248,6 +1256,46 @@ export default function Home() {
     }
   };
 
+  const idsMatch = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every((id) => set.has(id));
+  };
+
+  const removeEntries = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const drop = new Set(ids);
+    setEntries((prev) => prev.filter((entry) => !drop.has(entry.id)));
+    setSelectedIds((prev) => {
+      if (![...prev].some((id) => drop.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of drop) next.delete(id);
+      return next;
+    });
+    if (selectAnchorRef.current && drop.has(selectAnchorRef.current)) {
+      selectAnchorRef.current = null;
+    }
+    setAudioIds((prev) => {
+      if (![...prev].some((id) => drop.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of drop) next.delete(id);
+      return next;
+    });
+    setArmedDelete(null);
+    void deleteAudioSegments(ids).catch((err) =>
+      console.error('audio delete failed:', err)
+    );
+  };
+
+  const requestDelete = (ids: string[]) => {
+    if (ids.length === 0) return;
+    if (armedDelete && idsMatch(armedDelete, ids)) {
+      removeEntries(ids);
+      return;
+    }
+    setArmedDelete(ids);
+  };
+
   const assignSelectedBucket = (speakerId: number) => {
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
@@ -1286,6 +1334,22 @@ export default function Home() {
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
+          <button
+            type="button"
+            className={
+              armedDelete?.length === 1 && armedDelete[0] === entry.id
+                ? `${styles.entryDelete} ${styles.entryDeleteArmed}`
+                : styles.entryDelete
+            }
+            aria-label={
+              armedDelete?.length === 1 && armedDelete[0] === entry.id
+                ? '削除を確定'
+                : 'この発言を削除'
+            }
+            onClick={() => requestDelete([entry.id])}
+          >
+            {armedDelete?.length === 1 && armedDelete[0] === entry.id ? '削除' : '×'}
+          </button>
         </div>
         <pre className={styles.transcript}>{entry.text}</pre>
         {entry.textJa && (
@@ -1315,9 +1379,21 @@ export default function Home() {
         ))}
         <button
           type="button"
+          className={
+            armedDelete && idsMatch(armedDelete, [...selectedIds])
+              ? `${styles.assignDelete} ${styles.assignDeleteArmed}`
+              : styles.assignDelete
+          }
+          onClick={() => requestDelete([...selectedIds])}
+        >
+          {armedDelete && idsMatch(armedDelete, [...selectedIds]) ? '削除する' : '削除'}
+        </button>
+        <button
+          type="button"
           className={styles.assignClear}
           onClick={() => {
             setSelectedIds(new Set());
+            setArmedDelete(null);
             selectAnchorRef.current = null;
           }}
         >

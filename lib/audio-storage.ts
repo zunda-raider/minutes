@@ -117,6 +117,23 @@ export async function listAudioSegments(): Promise<StoredAudioSegment[]> {
   }
 }
 
+export async function deleteAudioSegments(ids: string[]): Promise<void> {
+  if (!canUseIdb() || ids.length === 0) return;
+  const db = await openDb();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      for (const id of ids) store.delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('IndexedDB delete failed'));
+      tx.onabort = () => reject(tx.error ?? new Error('IndexedDB delete aborted'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export async function clearAllAudio(): Promise<void> {
   if (!canUseIdb()) return;
   const db = await openDb();
