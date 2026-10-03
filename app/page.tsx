@@ -1014,13 +1014,6 @@ export default function Home() {
       >
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryIndex}>#{entry.note}</span>
-          {entry.speakerId != null && (
-            <span
-              className={isSelf ? styles.speakerTagSelf : styles.speakerTagOther}
-            >
-              {speakerDisplayName(entry.speakerId)}
-            </span>
-          )}
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
