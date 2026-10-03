@@ -46,10 +46,56 @@ function entryText(entry: GdHistoryEntry): string {
   return entry.text.trim();
 }
 
-function excerpt(text: string): string {
+
+const SESSION_GAP_MS = 30 * 60 * 1000;
+
+type VoyageSession = {
+  id: string;
+  entries: GdHistoryEntry[];
+  start: number;
+  end: number;
+};
+
+function groupSessions(ordered: GdHistoryEntry[]): VoyageSession[] {
+  const timed = [...ordered].sort((a, b) => {
+    const ta = Date.parse(a.at);
+    const tb = Date.parse(b.at);
+    if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
+    return a.note - b.note;
+  });
+  const sessions: VoyageSession[] = [];
+  for (const entry of timed) {
+    const t = Date.parse(entry.at);
+    const stamp = Number.isFinite(t) ? t : 0;
+    const last = sessions[sessions.length - 1];
+    if (!last || (stamp > 0 && last.end > 0 && stamp - last.end > SESSION_GAP_MS)) {
+      sessions.push({ id: entry.id, entries: [entry], start: stamp, end: stamp });
+    } else {
+      last.entries.push(entry);
+      if (stamp > last.end) last.end = stamp;
+      if (last.start === 0 && stamp > 0) last.start = stamp;
+    }
+  }
+  for (const session of sessions) {
+    session.entries.sort((a, b) => a.note - b.note);
+  }
+  return sessions.reverse();
+}
+
+function formatWhen(ms: number): string {
+  if (!ms) return '時刻不明';
+  return new Date(ms).toLocaleString('ja-JP', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function ticket(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim();
-  if (flat.length <= 90) return flat || '（空）';
-  return `${flat.slice(0, 90)}…`;
+  if (flat.length <= 36) return flat || '（空）';
+  return `${flat.slice(0, 36)}…`;
 }
 
 function speakerCaption(entry: GdHistoryEntry): string {
@@ -84,6 +130,111 @@ function smoothDetour(
     next += ` C ${x + 22} ${midY}, ${x + 8} ${routeY}, ${x} ${routeY}`;
   }
   return next;
+}
+
+function DockedVoyage({ crates }: { crates: number }) {
+  const rawId = useId().replace(/:/g, '');
+  const skyId = `${rawId}-lobby-sky`;
+  const seaId = `${rawId}-lobby-sea`;
+  const woodId = `${rawId}-lobby-wood`;
+  const shown = Math.min(Math.max(crates, 0), 4);
+
+  return (
+    <svg
+      className={`${gd.sea} ${gd.lobbySea}`}
+      viewBox="0 0 960 280"
+      role="img"
+      aria-label="港に停泊した船。点線の航路の先に、まだ霧の中の島があります。"
+    >
+      <defs>
+        <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#7dd3fc" />
+          <stop offset="0.55" stopColor="#e0f2fe" />
+          <stop offset="1" stopColor="#fef3c7" />
+        </linearGradient>
+        <linearGradient id={seaId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#38bdf8" />
+          <stop offset="0.4" stopColor="#0284c7" />
+          <stop offset="1" stopColor="#082f49" />
+        </linearGradient>
+        <linearGradient id={woodId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#d6a36a" />
+          <stop offset="1" stopColor="#92400e" />
+        </linearGradient>
+      </defs>
+      <rect width="960" height="280" fill={`url(#${skyId})`} />
+      <circle cx="820" cy="48" r="26" fill="#fde68a" opacity="0.35" />
+      <circle cx="820" cy="48" r="16" fill="#facc15" />
+      <g fill="#ffffff" opacity="0.9">
+        <ellipse cx="180" cy="42" rx="26" ry="11" />
+        <ellipse cx="204" cy="38" rx="18" ry="12" />
+        <ellipse cx="160" cy="40" rx="14" ry="9" />
+        <ellipse cx="520" cy="30" rx="30" ry="12" />
+        <ellipse cx="548" cy="26" rx="18" ry="12" />
+      </g>
+      <rect y="118" width="960" height="162" fill={`url(#${seaId})`} />
+      <g className={gd.waveDrift} fill="none">
+        <path
+          d="M-320 150 Q-240 136 -160 150 T0 150 T160 150 T320 150 T480 150 T640 150 T800 150 T960 150 T1120 150 T1280 150"
+          stroke="rgba(255,255,255,0.28)"
+          strokeWidth="2"
+        />
+        <path
+          className={gd.waveFill}
+          d="M-320 210 Q-240 196 -160 210 T0 210 T160 210 T320 210 T480 210 T640 210 T800 210 T960 210 T1120 210 T1280 210 V280 H-320 Z"
+        />
+      </g>
+      <path
+        d="M250 168 C 390 168, 520 150, 760 156"
+        fill="none"
+        stroke="rgba(255,255,255,0.8)"
+        strokeDasharray="8 9"
+        strokeLinecap="round"
+        strokeWidth="2.4"
+      />
+      <g opacity="0.5">
+        <ellipse cx="860" cy="176" rx="52" ry="10" fill="#fde68a" />
+        <path d="M826 166 Q852 142 888 162 Q908 148 920 168 Q892 160 860 166 Q838 172 826 166 Z" fill="#16a34a" />
+        <rect x="838" y="148" width="36" height="16" rx="4" fill="#fffbeb" stroke="#78350f" strokeWidth="1" />
+        <text x="856" y="160" textAnchor="middle" fill="#78350f" fontSize="9" fontWeight="700">
+          島
+        </text>
+      </g>
+      <g>
+        <rect x="28" y="150" width="168" height="16" rx="3" fill={`url(#${woodId})`} />
+        <rect x="40" y="166" width="10" height="46" rx="2" fill="#78350f" />
+        <rect x="168" y="166" width="10" height="46" rx="2" fill="#78350f" />
+        <path d="M186 158 C 210 150, 214 142, 228 146" fill="none" stroke="#fef3c7" strokeWidth="1.6" />
+      </g>
+      {Array.from({ length: shown }, (_, i) => (
+        <g key={i} transform={`translate(${46 + i * 28} 128)`}>
+          <rect width="22" height="18" rx="3" fill="#fde68a" stroke="#92400e" strokeWidth="1.2" />
+          <path d="M0 6 H22" stroke="#92400e" strokeWidth="1" />
+        </g>
+      ))}
+      <g className={gd.shipBob}>
+        <path d="M214 156 Q250 168 292 154" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="1.5" />
+        <path d="M230 150 L292 144 L278 164 L222 164 Z" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.2" />
+        <path d="M248 150 L256 142 L266 150 Z" fill="#fb7185" />
+        <path d="M258 148 L258 112" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
+        <path d="M259 116 L259 146 L286 132 Z" fill="#fff7ed" stroke="#9a3412" strokeWidth="0.9" />
+        <path d="M259 116 L276 124 L259 132 Z" fill="#e11d48" />
+      </g>
+      <text
+        x="78"
+        y="108"
+        fill="#0f172a"
+        fontSize="14"
+        fontWeight="700"
+        stroke="#f8fafc"
+        strokeWidth="4"
+        paintOrder="stroke"
+        strokeLinejoin="round"
+      >
+        停泊中
+      </text>
+    </svg>
+  );
 }
 
 function Voyage({
@@ -439,6 +590,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
     [entries]
   );
   const [picked, setPicked] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -446,12 +598,37 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   const [snapshot, setSnapshot] = useState<GdHistoryEntry[]>([]);
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
 
+  const sessions = useMemo(() => groupSessions(ordered), [ordered]);
+  const activeSession =
+    sessions.find((session) => session.id === sessionId) ?? sessions[0] ?? null;
+  const sessionEntries = activeSession?.entries ?? [];
+
   useEffect(() => {
     if (picked) return;
-    setSelected(new Set(ordered.map((entry) => entry.id)));
-  }, [ordered, picked]);
+    const newest = sessions[0];
+    setSessionId(newest?.id ?? null);
+    setSelected(new Set(newest ? newest.entries.map((entry) => entry.id) : []));
+  }, [sessions, picked]);
 
-  const allOn = ordered.length > 0 && ordered.every((entry) => selected.has(entry.id));
+  const selectedCount = sessionEntries.filter((entry) => selected.has(entry.id)).length;
+  const allOn = sessionEntries.length > 0 && selectedCount === sessionEntries.length;
+
+  function chooseSession(session: VoyageSession) {
+    setPicked(true);
+    setSessionId(session.id);
+    setSelected(new Set(session.entries.map((entry) => entry.id)));
+    setError('');
+  }
+
+  function toggleCargo(id: string) {
+    setPicked(true);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function runAnalysis() {
     const chosen = ordered.filter((entry) => selected.has(entry.id));
@@ -542,21 +719,20 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
       ? result.mappings.filter((mapping) => mapping.topicId === activeTopic)
       : [];
 
-  return (
-    <div className={`${styles.app} ${styles.appGd}`}>
-      <div className={styles.bgGlow} aria-hidden="true" />
-      <header className={styles.noteTopBar}>
-        <button type="button" className={styles.backButton} onClick={onBack}>
-          <span className={styles.backChevron} aria-hidden="true" />
-          Home
-        </button>
-        <div className={styles.noteHeading}>
-          <h1 className={styles.title}>GD議事録</h1>
-          <p className={styles.subtitle}>グループディスカッション</p>
-        </div>
-      </header>
-
-      {result ? (
+  if (result) {
+    return (
+      <div className={`${styles.app} ${styles.appGd}`}>
+        <div className={styles.bgGlow} aria-hidden="true" />
+        <header className={styles.noteTopBar}>
+          <button type="button" className={styles.backButton} onClick={onBack}>
+            <span className={styles.backChevron} aria-hidden="true" />
+            Home
+          </button>
+          <div className={styles.noteHeading}>
+            <h1 className={styles.title}>GD議事録</h1>
+            <p className={styles.subtitle}>グループディスカッション</p>
+          </div>
+        </header>
         <div className={gd.stack}>
           <div className={gd.resultBar}>
             <p className={gd.pickerHelp}>
@@ -669,96 +845,152 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             )}
           </section>
         </div>
-      ) : (
-        <section className={gd.picker}>
-          <p className={gd.stub}>
-            GDを終了して自動で結果を開く動線は準備中です。このブラウザに保存されている文字起こしを選んで「分析する」と、同じ結果画面を試せます。
-          </p>
-          <div className={gd.pickerHead}>
-            <div>
-              <h2 className={gd.pickerTitle}>過去の文字起こし</h2>
-              <p className={gd.pickerHelp}>
-                {historyReady
-                  ? `保存済み ${ordered.length} 件。チェックした発言だけを、終了時の1回の分析に使います。`
-                  : '履歴を読み込んでいます…'}
-              </p>
-            </div>
-          </div>
+      </div>
+    );
+  }
 
-          {historyReady && ordered.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h3 className={styles.emptyTitle}>保存済みの文字起こしがありません</h3>
-              <p className={styles.emptyBody}>
-                Homeで録音すると、この画面に履歴が出ます。ライブのGD終了はまだ接続していません。
-              </p>
-              <button type="button" className={styles.recordButton} onClick={onBack}>
-                Home に戻る
-              </button>
-            </div>
-          ) : (
-            <>
-              <ul className={gd.historyList}>
-                {ordered.map((entry) => {
-                  const role = gdSpeakerFromId(entry.speakerId);
+  return (
+    <div className={`${styles.app} ${styles.appGd} ${gd.lobbyShell}`}>
+      <header className={gd.lobbyBar}>
+        <button type="button" className={styles.backButton} onClick={onBack}>
+          <span className={styles.backChevron} aria-hidden="true" />
+          Home
+        </button>
+        <div className={gd.lobbyHeading}>
+          <p className={gd.lobbyKicker}>GDモード</p>
+          <h1 className={gd.lobbyTitle}>出航準備</h1>
+          <p className={gd.lobbyLead}>
+            港で航海ログを選び、積み荷カードを積んでから出航します。分析と航海図・木は、出航のあとです。
+          </p>
+        </div>
+      </header>
+
+      <section className={gd.lobby} aria-label="出航ロビー">
+        <DockedVoyage crates={selectedCount} />
+        <p className={gd.lobbyCaption}>
+          {historyReady
+            ? selectedCount > 0
+              ? `船はまだ桟橋です。積み荷 ${selectedCount} 枚。点線の先が、これからの島です。`
+              : '船は桟橋にいます。積み荷を選ぶと出航できます。'
+            : '航海ログを探しています…'}
+        </p>
+        <p className={gd.lobbyNote}>
+          ライブのGD終了から自動で出航する動線は準備中です。このブラウザに保存された記録から選べます。
+        </p>
+
+        {historyReady && ordered.length === 0 ? (
+          <div className={gd.emptyHarbor}>
+            <h2>港はまだ静かです</h2>
+            <p>Homeで録音すると、ここに航海ログが着岸します。</p>
+            <button type="button" className={gd.sailButton} onClick={onBack}>
+              <span className={gd.sailKicker}>戻る</span>
+              <span>Homeへ</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className={gd.lobbyBlock}>
+              <div className={gd.lobbyBlockHead}>
+                <h2>過去の航海</h2>
+                <p>30分以上あいた記録は、別の航海として並びます。文字起こしの一覧ではありません。</p>
+              </div>
+              <div className={gd.sessionRow} role="radiogroup" aria-label="過去の航海を選ぶ">
+                {sessions.map((session) => {
+                  const active = activeSession?.id === session.id;
                   return (
-                    <li key={entry.id} className={gd.historyItem}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(entry.id)}
-                        aria-label={`#${formatGdNote(entry.note)} を分析に含める`}
-                        onChange={() => {
-                          setPicked(true);
-                          setSelected((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(entry.id)) next.delete(entry.id);
-                            else next.add(entry.id);
-                            return next;
-                          });
-                        }}
-                      />
-                      <div>
-                        <div className={gd.historyMeta}>
-                          <span className={gd.note}>#{formatGdNote(entry.note)}</span>
-                          <span className={role === '自分' ? gd.selfTag : gd.otherTag}>
-                            {speakerCaption(entry)}
-                          </span>
-                        </div>
-                        <p className={gd.historyText}>{excerpt(entryText(entry))}</p>
-                      </div>
-                    </li>
+                    <button
+                      key={session.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={active ? `${gd.sessionChip} ${gd.sessionChipOn}` : gd.sessionChip}
+                      onClick={() => chooseSession(session)}
+                    >
+                      <span className={gd.sessionWhen}>{formatWhen(session.start)}</span>
+                      <span className={gd.sessionCount}>{session.entries.length}枚</span>
+                    </button>
                   );
                 })}
-              </ul>
-              <div className={gd.pickerActions}>
-                <button
-                  type="button"
-                  className={gd.ghost}
-                  onClick={() => {
-                    setPicked(true);
-                    setSelected(allOn ? new Set() : new Set(ordered.map((entry) => entry.id)));
-                  }}
-                  disabled={!historyReady || ordered.length === 0}
-                >
-                  {allOn ? 'すべて解除' : 'すべて選択'}
-                </button>
-                <button
-                  type="button"
-                  className={gd.analyzeButton}
-                  disabled={busy || !historyReady || ordered.length === 0}
-                  onClick={() => void runAnalysis()}
-                >
-                  {busy ? '分析中…' : '分析する'}
-                </button>
               </div>
-            </>
-          )}
-          {error && (
-            <p className={gd.error} role="alert">
-              {error}
-            </p>
-          )}
-        </section>
-      )}
+            </div>
+
+            <div className={gd.lobbyBlock}>
+              <div className={gd.lobbyBlockHead}>
+                <h2>積み荷カード</h2>
+                <p>
+                  {activeSession
+                    ? `${formatWhen(activeSession.start)} の航海から、船に積むカードを選びます。`
+                    : 'カードを選んでください。'}
+                </p>
+              </div>
+              <div className={gd.cargoGrid}>
+                {sessionEntries.map((entry) => {
+                  const on = selected.has(entry.id);
+                  const role = gdSpeakerFromId(entry.speakerId);
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      className={on ? `${gd.cargo} ${gd.cargoOn}` : gd.cargo}
+                      aria-pressed={on}
+                      onClick={() => toggleCargo(entry.id)}
+                    >
+                      <span className={gd.cargoTop}>
+                        <span className={gd.cargoNote}>#{formatGdNote(entry.note)}</span>
+                        <span className={role === '自分' ? gd.selfTag : gd.otherTag}>
+                          {speakerCaption(entry)}
+                        </span>
+                      </span>
+                      <span className={gd.cargoExcerpt}>{ticket(entryText(entry))}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className={gd.ghost}
+                onClick={() => {
+                  setPicked(true);
+                  setSelected(
+                    allOn ? new Set() : new Set(sessionEntries.map((entry) => entry.id))
+                  );
+                }}
+                disabled={!historyReady || sessionEntries.length === 0}
+              >
+                {allOn ? '積み荷をすべて降ろす' : 'この航海をすべて積む'}
+              </button>
+            </div>
+
+            {error && (
+              <p className={gd.error} role="alert">
+                {error}
+              </p>
+            )}
+
+            <div className={gd.sailDock}>
+              <p className={gd.sailStatus}>
+                {selectedCount > 0
+                  ? `${selectedCount}枚を船に積みました`
+                  : '積み荷が空です'}
+              </p>
+              <button
+                type="button"
+                className={gd.sailButton}
+                disabled={busy || !historyReady || selectedCount === 0}
+                onClick={() => void runAnalysis()}
+              >
+                <span className={gd.sailKicker}>{busy ? '航路を描いています' : '分析する'}</span>
+                <span>{busy ? '出航中…' : '出航'}</span>
+              </button>
+            </div>
+          </>
+        )}
+        {historyReady && ordered.length === 0 && error && (
+          <p className={gd.error} role="alert">
+            {error}
+          </p>
+        )}
+      </section>
     </div>
   );
 }

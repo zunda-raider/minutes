@@ -1700,3 +1700,30 @@
   padding: 0.35rem 0;
   background: rgba(7, 9, 15, 0.94);
 }
+
+.gdEntry {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(56, 189, 248, 0.7);
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.35), rgba(8, 47, 73, 0.8));
+  color: #e0f2fe;
+  border-radius: 999px;
+  padding: 0.32rem 0.75rem 0.32rem 0.35rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(2, 132, 199, 0.28);
+}
+
+.gdEntryBadge {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  background: #facc15;
+  color: #422006;
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  font-weight: 800;
+}
