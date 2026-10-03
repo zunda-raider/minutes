@@ -481,6 +481,42 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 
+/* Speaker A / 自分 vs everyone else — readable without reading the label */
+.entrySelf {
+  border-color: rgba(52, 211, 153, 0.5);
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.16), rgba(52, 211, 153, 0.05));
+  box-shadow: inset 5px 0 0 #34d399, 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.entryOther {
+  border-color: rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(100, 116, 139, 0.1), rgba(0, 0, 0, 0.08));
+  box-shadow: inset 5px 0 0 #64748b, 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.speakerTagSelf,
+.speakerTagOther {
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.speakerTagSelf {
+  color: #d1fae5;
+  background: rgba(52, 211, 153, 0.22);
+  border: 1px solid rgba(52, 211, 153, 0.55);
+}
+
+.speakerTagOther {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  font-weight: 600;
+}
+
 .entryMetaMinimal {
   display: flex;
   align-items: baseline;
@@ -1241,6 +1277,7 @@
 .letterToggle {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.35rem;
 }
 
@@ -1272,6 +1309,53 @@
   border-color: rgba(124, 92, 255, 0.55);
   background: rgba(124, 92, 255, 0.22);
   color: #efeaff;
+}
+
+/* Zoom picker: A（自分） is the primary control; B–G stay secondary */
+.letterButtonSelf,
+.letterButtonSelfActive {
+  appearance: none;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 1.05rem;
+  line-height: 1.2;
+  min-height: 52px;
+  padding: 0.65rem 1.15rem;
+  border-radius: 14px;
+  border: 2px solid rgba(52, 211, 153, 0.65);
+  background: rgba(52, 211, 153, 0.18);
+  color: #ecfdf5;
+}
+
+.letterButtonSelf:hover,
+.letterButtonSelfActive:hover {
+  background: rgba(52, 211, 153, 0.28);
+}
+
+.letterButtonSelfActive {
+  background: rgba(52, 211, 153, 0.38);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.28);
+}
+
+.letterButtonOther,
+.letterButtonOtherActive {
+  appearance: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  min-height: 28px;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+}
+
+.letterButtonOtherActive {
+  border-color: rgba(148, 163, 184, 0.55);
+  background: rgba(148, 163, 184, 0.18);
+  color: #e2e8f0;
 }
 
 .activeSpeakerBar {
