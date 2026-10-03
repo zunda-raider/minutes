@@ -320,12 +320,122 @@
 .board {
   flex: 1;
   min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem 0.65rem;
+}
+
+.tree {
+  flex: 0 0 20%;
+  width: 20%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  overflow: auto;
+  padding: 0.7rem 0.65rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(246, 212, 138, 0.42);
+  background:
+    linear-gradient(180deg, rgba(28, 20, 12, 0.92), rgba(12, 10, 16, 0.88));
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 214, 0.04);
+}
+
+.treeKicker {
+  margin: 0;
+  flex: none;
+  color: #f6d48a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.treeRoot {
+  flex: none;
+  padding: 0.45rem 0.55rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(246, 212, 138, 0.7);
+  background: rgba(246, 212, 138, 0.1);
+}
+
+.treeRole {
+  margin: 0;
+  color: #f6d48a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.treeGoal,
+.treeMuted {
+  margin: 0.2rem 0 0;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.treeMuted,
+.treeEmpty {
+  color: rgba(248, 241, 227, 0.55);
+  font-weight: 650;
+}
+
+.treeList {
+  list-style: none;
+  margin: 0.1rem 0 0 0.55rem;
+  padding: 0;
+  border-left: 2px solid rgba(246, 212, 138, 0.5);
+}
+
+.treeList > li {
   position: relative;
+  margin: 0.4rem 0 0;
+  padding-left: 0.7rem;
+}
+
+.treeList > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.85rem;
+  width: 0.7rem;
+  border-top: 2px solid rgba(246, 212, 138, 0.5);
+}
+
+.treeEmpty {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  padding-top: 0.12rem;
+}
+
+.treeNode {
+  margin: 0;
+  padding: 0.28rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 241, 227, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.treeNodeCurrent {
+  color: #1a1208;
+  background: #f6d48a;
+  border-color: #f6d48a;
+  box-shadow: 0 0 0 3px rgba(246, 212, 138, 0.22);
 }
 
 .scroller {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1 1 80%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   overflow-anchor: none;

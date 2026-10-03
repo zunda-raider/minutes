@@ -336,6 +336,36 @@ export function GdLive({ onBack, onHarbor }: Props) {
       </header>
 
       <div className={styles.board}>
+        <aside className={styles.tree} aria-label="論理の木">
+          <p className={styles.treeKicker}>論理の木</p>
+          <div className={styles.treeRoot}>
+            <p className={styles.treeRole}>目的</p>
+            <p className={goal.trim() ? styles.treeGoal : styles.treeMuted}>
+              {goal.trim() || 'お題はまだありません'}
+            </p>
+          </div>
+          <ul className={styles.treeList}>
+            {topics.length === 0 ? (
+              <li className={styles.treeEmpty}>論点はまだありません</li>
+            ) : (
+              topics.map((topic, index) => {
+                const current = index === topics.length - 1;
+                return (
+                  <li key={topic.id}>
+                    <p
+                      className={
+                        current ? `${styles.treeNode} ${styles.treeNodeCurrent}` : styles.treeNode
+                      }
+                      aria-current={current ? 'true' : undefined}
+                    >
+                      {topic.name}
+                    </p>
+                  </li>
+                );
+              })
+            )}
+          </ul>
+        </aside>
         <div className={styles.scroller} ref={scrollerRef}>
           <div className={styles.laneHeads}>
             <p>他者</p>
