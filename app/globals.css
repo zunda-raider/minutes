@@ -42,3 +42,25 @@ select:focus-visible {
   outline: 2px solid #5b8cff;
   outline-offset: 2px;
 }
+
+/* Top-bar kill switch while a Zoom/GD display share is live. */
+.haltShare {
+  appearance: none;
+  border: 0;
+  background: #e11d48;
+  color: #fff;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 0.5rem 1.05rem;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.45);
+}
+
+.haltShare:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}

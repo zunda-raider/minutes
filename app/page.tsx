@@ -64,7 +64,9 @@ import {
   acquireSystemAudio,
   openSelfMic,
   pickRecorderMimeType,
+  stopMediaTracks,
 } from '@/lib/zoom-capture';
+import { haltLiveCapture, useLiveCaptureOn, watchLiveCapture } from '@/lib/live-capture';
 
 type LangOption = { code: string; label: string };
 
@@ -206,6 +208,7 @@ function readTextSelection(): { hits: string[]; spans: Map<string, TextSpan> } |
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
+  const shareOn = useLiveCaptureOn();
   const [pendingCount, setPendingCount] = useState(0);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState('');
@@ -266,6 +269,8 @@ export default function Home() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const releaseLiveRef = useRef<(() => void) | null>(null);
+  const stopRecordingRef = useRef<() => void>(() => {});
   /** Parallel mic used only in Zoom/system mode, for 自分 energy — not STT. */
   const micStreamRef = useRef<MediaStream | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -431,9 +436,10 @@ export default function Home() {
     audioSource === 'system' ? ZOOM_SEGMENT_MS : SEGMENT_MS_MIC;
 
   const stopTracks = () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    releaseLiveRef.current?.();
+    releaseLiveRef.current = null;
+    stopMediaTracks(streamRef.current, micStreamRef.current);
     streamRef.current = null;
-    micStreamRef.current?.getTracks().forEach((track) => track.stop());
     micStreamRef.current = null;
     const micRec = micRecorderRef.current;
     micRecorderRef.current = null;
@@ -861,6 +867,13 @@ export default function Home() {
     streamRef.current = stream;
     mimeTypeRef.current = pickRecorderMimeType();
     wantRecordingRef.current = true;
+    if (audioSource === 'system') {
+      releaseLiveRef.current?.();
+      const watched = [stream, selfMic].filter((item): item is MediaStream => item != null);
+      releaseLiveRef.current = watchLiveCapture(() => {
+        stopRecordingRef.current();
+      }, watched);
+    }
     rotateAfterStopRef.current = false;
 
     stream.getAudioTracks().forEach((track) => {
@@ -914,6 +927,7 @@ export default function Home() {
     }
     recorder.stop();
   };
+  stopRecordingRef.current = stopRecording;
 
   const flashCopyHint = (message: string) => {
     setCopyHint(message);
@@ -1810,6 +1824,16 @@ export default function Home() {
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
         <div className={styles.topMeta}>
+          {shareOn ? (
+            <button
+              type="button"
+              className="haltShare"
+              aria-label="録音と画面共有を停止"
+              onClick={() => haltLiveCapture()}
+            >
+              停止
+            </button>
+          ) : null}
           <span className={styles.metaChip}>{entries.length} segments</span>
           <span className={styles.metaChip}>Copy all = 古い順</span>
         </div>
@@ -1915,14 +1939,25 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
-          <button
-            type="button"
-            className={styles.gdEntry}
-            onClick={() => setScreen('gd')}
-          >
-            <span className={styles.gdEntryBadge}>出航</span>
-            GDモード
-          </button>
+          {shareOn ? (
+            <button
+              type="button"
+              className="haltShare"
+              aria-label="録音と画面共有を停止"
+              onClick={() => haltLiveCapture()}
+            >
+              停止
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.gdEntry}
+              onClick={() => setScreen('gd')}
+            >
+              <span className={styles.gdEntryBadge}>出航</span>
+              GDモード
+            </button>
+          )}
         </div>
       </header>
 
