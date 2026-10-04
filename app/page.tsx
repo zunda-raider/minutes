@@ -34,6 +34,7 @@ import {
 } from '@/lib/speaker-letters';
 import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
 import { mergeSelectedCards } from '@/lib/merge-entries';
+import { coalesceHomeCaptureChunks } from '@/lib/coalesce-home-chunks';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
@@ -89,7 +90,8 @@ type TranscriptEntry = {
 type Screen = 'home' | 'note1' | 'note2' | 'gd';
 type AudioSource = 'mic' | 'system';
 
-/** Minutes / Home: Zoom and mic both rotate about once a minute. */
+/** Minutes / Home: Zoom and mic both rotate about once a minute.
+ * Mid-cut Whisper / pitch / diarize turns are folded back into one card. */
 const HOME_SEGMENT_MS = 60_000;
 
 function formatTime(iso: string): string {
@@ -550,13 +552,13 @@ export default function Home() {
           text.length > 0;
 
         if (useMicEnergy) {
-          // Zoom only: mic RMS vs system RMS inside each whisper window.
+          // Zoom only: one energy window for the whole Home cut (~60s).
+          // Per-Whisper-row cards stay on GD live (transcribe-zoom).
           // Mic-only jobs never carry micBlob, so they stay on the manual role.
           try {
-            const timed: EnergyWindow[] =
-              data.segments && data.segments.length > 0
-                ? data.segments
-                : [{ text, startSec: 0, endSec: Number.POSITIVE_INFINITY }];
+            const timed: EnergyWindow[] = [
+              { text, startSec: 0, endSec: Number.POSITIVE_INFINITY },
+            ];
             const tagged = await speakersFromMicEnergy(blob, job.micBlob!, timed);
             chunks = tagged.map((row) => ({
               text: row.text,
@@ -610,6 +612,9 @@ export default function Home() {
             chunks = [{ text, speaker: undefined }];
           }
         }
+
+        // One Home capture ≈ HOME_SEGMENT_MS; do not keep Whisper-fine cards.
+        chunks = coalesceHomeCaptureChunks(chunks);
 
         if (text.length > 0 || chunks.some((t) => t.text.trim())) {
           const newEntries: TranscriptEntry[] = [];
