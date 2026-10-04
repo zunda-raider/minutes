@@ -78,6 +78,7 @@
 
 .home,
 .harbor,
+.navBtn,
 .go,
 .stop,
 .speed,
@@ -89,7 +90,8 @@
 }
 
 .home,
-.harbor {
+.harbor,
+.navBtn {
   border: 1px solid rgba(246, 212, 138, 0.4);
   background: rgba(255, 244, 214, 0.06);
   color: #f8f1e3;
@@ -113,8 +115,19 @@
   transform: rotate(45deg);
 }
 
-.harbor {
-  margin-left: auto;
+.pending {
+  margin: 0 0 0 auto;
+  min-height: 1.2em;
+  color: rgba(248, 241, 227, 0.78);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.navBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .brand {
@@ -677,7 +690,7 @@
     flex-wrap: wrap;
   }
 
-  .harbor {
+  .pending {
     margin-left: 0;
   }
 
