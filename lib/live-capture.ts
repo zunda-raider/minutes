@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { beginHardHalt, finishHardHalt } from '@/lib/capture-resources';
 import { stopMediaTracks } from '@/lib/zoom-capture';
 
 type Entry = {
@@ -32,11 +33,16 @@ export function watchLiveCapture(stop: () => void, streams: MediaStream[]): () =
   };
 }
 
-/** Hard stop: end every recorder, then stop display, system-audio, and mic tracks. */
+/**
+ * Hard stop. Cancels rotate timers, the GD clock, and pending transcribe
+ * work before UI stops run, then kills recorders, audio graphs, display
+ * video, system audio, and the self mic — including streams a ref dropped.
+ */
 export function haltLiveCapture() {
   const snapshot = [...entries];
   entries.clear();
   emit();
+  beginHardHalt();
   for (const entry of snapshot) {
     try {
       entry.stop();
@@ -47,6 +53,7 @@ export function haltLiveCapture() {
   for (const entry of snapshot) {
     stopMediaTracks(...entry.streams);
   }
+  finishHardHalt();
 }
 
 function subscribe(listener: () => void) {

@@ -3,6 +3,7 @@
  * when whisper.cpp tinydiarize is unavailable.
  */
 
+import { trackAudioContext } from '@/lib/capture-resources';
 import { MAX_SPEAKERS } from '@/lib/speaker-letters';
 
 export type PitchCentroid = {
@@ -87,7 +88,7 @@ export async function analyzeBlobPitch(blob: Blob): Promise<PitchAnalysis> {
   }
 
   try {
-    const ctx = new AudioContext();
+    const ctx = trackAudioContext(new AudioContext());
     try {
       const buf = await blob.arrayBuffer();
       const audio = await ctx.decodeAudioData(buf.slice(0));

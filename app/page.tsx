@@ -68,6 +68,15 @@ import {
   pickRecorderMimeType,
   stopMediaTracks,
 } from '@/lib/zoom-capture';
+import {
+  captureGeneration,
+  clearTrackedInterval,
+  registerHaltHook,
+  rememberStream,
+  trackAbort,
+  trackInterval,
+  trackRecorder,
+} from '@/lib/capture-resources';
 import { watchLiveCapture } from '@/lib/live-capture';
 import { StopShareButton } from './stop-share';
 
@@ -291,6 +300,9 @@ export default function Home() {
   const wantRecordingRef = useRef(false);
   const rotateAfterStopRef = useRef(false);
   const segmentTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Bumped on soft stop and hard halt so a stale rotate interval clears itself. */
+  const timerSessionRef = useRef(0);
+  const startingRef = useRef(false);
 
   type UploadJob = {
     blob: Blob;
@@ -304,6 +316,9 @@ export default function Home() {
   };
   const uploadQueueRef = useRef<UploadJob[]>([]);
   const queueRunningRef = useRef(false);
+  /** Bumped on hard halt so a late segment cannot enqueue or rotate. */
+  const queueEpochRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   /** Highest note number issued. Not a length, so deletes keep gaps. */
   const entriesLenRef = useRef(0);
   const lastSpeakerRef = useRef<number | null>(null);
@@ -347,8 +362,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    return registerHaltHook(() => {
+      queueEpochRef.current += 1;
+      uploadQueueRef.current = [];
+      abortRef.current?.abort();
+      abortRef.current = null;
+      queueRunningRef.current = false;
+      wantRecordingRef.current = false;
+      rotateAfterStopRef.current = false;
+      timerSessionRef.current += 1;
+      clearSegmentTimer();
+      setIsRecording(false);
+      setPendingCount(0);
+    });
+  }, []);
+
+  useEffect(() => {
     return () => {
-      if (segmentTimerRef.current) clearInterval(segmentTimerRef.current);
+      if (segmentTimerRef.current) clearTrackedInterval(segmentTimerRef.current);
       wantRecordingRef.current = false;
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
@@ -453,10 +484,6 @@ export default function Home() {
     releasingRef.current = true;
     releaseLiveRef.current?.();
     releaseLiveRef.current = null;
-    stopMediaTracks(streamRef.current, micStreamRef.current);
-    streamRef.current = null;
-    micStreamRef.current = null;
-    heldSourceRef.current = null;
     const micRec = micRecorderRef.current;
     micRecorderRef.current = null;
     if (micRec && micRec.state !== 'inactive') {
@@ -466,24 +493,38 @@ export default function Home() {
         /* already stopped */
       }
     }
+    const sysRec = mediaRecorderRef.current;
+    if (sysRec && sysRec.state !== 'inactive') {
+      try {
+        sysRec.stop();
+      } catch {
+        /* already stopped */
+      }
+    }
+    stopMediaTracks(streamRef.current, micStreamRef.current);
+    streamRef.current = null;
+    micStreamRef.current = null;
+    heldSourceRef.current = null;
     releasingRef.current = false;
   };
   stopTracksRef.current = stopTracks;
 
   const clearSegmentTimer = () => {
-    if (segmentTimerRef.current) {
-      clearInterval(segmentTimerRef.current);
-      segmentTimerRef.current = null;
-    }
+    clearTrackedInterval(segmentTimerRef.current);
+    segmentTimerRef.current = null;
   };
 
   const processQueue = useCallback(async () => {
     if (queueRunningRef.current) return;
     queueRunningRef.current = true;
+    const epoch = queueEpochRef.current;
 
     while (uploadQueueRef.current.length > 0) {
+      if (queueEpochRef.current !== epoch) break;
       const job = uploadQueueRef.current.shift()!;
       const blob = job.blob;
+      const controller = trackAbort(new AbortController());
+      abortRef.current = controller;
       try {
         const formData = new FormData();
         formData.append(
@@ -495,7 +536,9 @@ export default function Home() {
         const res = await fetch('/api/transcribe', {
           method: 'POST',
           body: formData,
+          signal: controller.signal,
         });
+        if (queueEpochRef.current !== epoch) break;
 
         let data: {
           text?: string;
@@ -560,6 +603,7 @@ export default function Home() {
               { text, startSec: 0, endSec: Number.POSITIVE_INFINITY },
             ];
             const tagged = await speakersFromMicEnergy(blob, job.micBlob!, timed);
+            if (queueEpochRef.current !== epoch) break;
             chunks = tagged.map((row) => ({
               text: row.text,
               speaker: row.speakerId,
@@ -579,6 +623,7 @@ export default function Home() {
           // Pitch / voice-height heuristic when tinydiarize unavailable
           try {
             const analysis = await analyzeBlobPitch(blob);
+            if (queueEpochRef.current !== epoch) break;
             const provisional = provisionalTurnsFromPitch(
               text,
               analysis,
@@ -670,14 +715,18 @@ export default function Home() {
           setError('変換はできたけど、内容が空でした。');
         }
       } catch (fetchErr) {
+        if (queueEpochRef.current !== epoch || controller.signal.aborted) break;
         console.error('送信エラー:', fetchErr);
         setError('文字起こしリクエストに失敗しました。');
       } finally {
-        setPendingCount((n) => Math.max(0, n - 1));
+        if (abortRef.current === controller) abortRef.current = null;
+        if (queueEpochRef.current === epoch) {
+          setPendingCount((n) => Math.max(0, n - 1));
+        }
       }
     }
 
-    queueRunningRef.current = false;
+    if (queueEpochRef.current === epoch) queueRunningRef.current = false;
   }, []);
 
   const enqueueTranscribe = useCallback(
@@ -704,10 +753,11 @@ export default function Home() {
   const startRecorderOnStream = useCallback(() => {
     const stream = streamRef.current;
     if (!stream) return;
+    const epoch = queueEpochRef.current;
 
     const mimeType = mimeTypeRef.current;
     chunksRef.current = [];
-    const recorder = new MediaRecorder(stream, { mimeType });
+    const recorder = trackRecorder(new MediaRecorder(stream, { mimeType }));
 
     const micStream = micStreamRef.current;
     let micRecorder: MediaRecorder | null = null;
@@ -718,7 +768,7 @@ export default function Home() {
       micStream.getAudioTracks().some((t) => t.readyState === 'live');
     if (micLive && micStream) {
       try {
-        micRecorder = new MediaRecorder(micStream, { mimeType });
+        micRecorder = trackRecorder(new MediaRecorder(micStream, { mimeType }));
         micRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) micChunks.push(e.data);
         };
@@ -739,8 +789,9 @@ export default function Home() {
     const finishSegment = () => {
       if (!systemDone || !micDone || settled) return;
       settled = true;
-      mediaRecorderRef.current = null;
-      micRecorderRef.current = null;
+      if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
+      if (micRecorderRef.current === micRecorder) micRecorderRef.current = null;
+      if (epoch !== queueEpochRef.current) return;
       const manualLock = segmentManualRef.current;
       if (systemBlob && systemBlob.size > 0) {
         enqueueTranscribe(systemBlob, {
@@ -769,6 +820,7 @@ export default function Home() {
     recorder.onerror = () => {
       setError('録音中にエラーが発生しました。');
       wantRecordingRef.current = false;
+      timerSessionRef.current += 1;
       clearSegmentTimer();
       stopTracks();
       setIsRecording(false);
@@ -829,7 +881,9 @@ export default function Home() {
     source: AudioSource
   ): Promise<MediaStream> => {
     if (source === 'mic') {
-      return navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      rememberStream(stream);
+      return stream;
     }
     return acquireSystemAudio();
   };
@@ -846,9 +900,13 @@ export default function Home() {
   };
 
   const startRecording = async () => {
+    if (startingRef.current) return;
+    startingRef.current = true;
+    try {
     setError('');
 
     const source = audioSource;
+    const generation = captureGeneration();
     let stream = streamRef.current;
     const reuse = hasLiveAudio(stream) && heldSourceRef.current === source;
 
@@ -884,6 +942,10 @@ export default function Home() {
       }
 
       const selfMic = await selfMicPromise;
+      if (generation !== captureGeneration()) {
+        stopMediaTracks(stream, selfMic);
+        return;
+      }
       if (wantSelfMic) {
         micStreamRef.current = selfMic;
         setSelfMicNote(
@@ -897,6 +959,10 @@ export default function Home() {
       heldSourceRef.current = source;
     } else if (source === 'system' && !hasLiveAudio(micStreamRef.current)) {
       const selfMic = await openSelfMic();
+      if (generation !== captureGeneration()) {
+        stopMediaTracks(selfMic);
+        return;
+      }
       micStreamRef.current = selfMic;
       setSelfMicNote(
         selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
@@ -916,6 +982,7 @@ export default function Home() {
         const source = heldSourceRef.current ?? audioSourceRef.current;
         wantRecordingRef.current = false;
         rotateAfterStopRef.current = false;
+        timerSessionRef.current += 1;
         clearSegmentTimer();
         const recorder = mediaRecorderRef.current;
         if (recorder && recorder.state !== 'inactive') {
@@ -940,24 +1007,52 @@ export default function Home() {
     setIsRecording(true);
 
     clearSegmentTimer();
-    segmentTimerRef.current = setInterval(() => {
-      rotateSegment();
-    }, HOME_SEGMENT_MS);
+    const timerSession = ++timerSessionRef.current;
+    const timerId = trackInterval(
+      setInterval(() => {
+        if (timerSession !== timerSessionRef.current || !wantRecordingRef.current) {
+          clearTrackedInterval(timerId);
+          if (segmentTimerRef.current === timerId) segmentTimerRef.current = null;
+          return;
+        }
+        rotateSegment();
+      }, HOME_SEGMENT_MS)
+    );
+    segmentTimerRef.current = timerId;
+    } finally {
+      startingRef.current = false;
+    }
   };
 
   const stopRecording = () => {
     wantRecordingRef.current = false;
     rotateAfterStopRef.current = false;
+    timerSessionRef.current += 1;
     clearSegmentTimer();
 
     const recorder = mediaRecorderRef.current;
+    const micRec = micRecorderRef.current;
     if (!recorder || recorder.state === 'inactive') {
+      if (micRec && micRec.state !== 'inactive') {
+        try {
+          micRec.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
       setIsRecording(false);
       return;
     }
     try {
       recorder.stop();
     } catch {
+      if (micRec && micRec.state !== 'inactive') {
+        try {
+          micRec.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
       setIsRecording(false);
     }
   };

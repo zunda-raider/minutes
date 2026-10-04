@@ -24,7 +24,8 @@ type TranscribePayload = {
 export async function transcribeZoomChunk(
   systemBlob: Blob,
   micBlob: Blob | null,
-  lang = 'ja'
+  lang = 'ja',
+  signal?: AbortSignal
 ): Promise<ZoomUtterance[]> {
   const formData = new FormData();
   formData.append(
@@ -33,7 +34,7 @@ export async function transcribeZoomChunk(
   );
   formData.append('lang', lang);
 
-  const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+  const res = await fetch('/api/transcribe', { method: 'POST', body: formData, signal });
   let data: TranscribePayload;
   try {
     data = (await res.json()) as TranscribePayload;
