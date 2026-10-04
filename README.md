@@ -26,7 +26,8 @@ cp .env.example .env.local
 | 変数 | 必須 | 説明 |
 |------|------|------|
 | `WHISPER_BIN` | Yes | `whisper-cli` の実行ファイルパス |
-| `WHISPER_MODEL` | Yes | 多言語モデルのパス（日英切替なら `*.en.bin` 以外） |
+| `WHISPER_MODEL` | Yes | 多言語モデルのパス（日英切替なら `*.en.bin` 以外）。Home / Note / Zoom は常にこれ |
+| `WHISPER_MODEL2` | No | GDライブ用の速いモデル（例: `ggml-small-q8_0.bin`）。未設定なら `WHISPER_MODEL` にフォールバック |
 | `FFMPEG_BIN` | No | ffmpeg（省略時は `ffmpeg`） |
 | `TEMP_DIR` | No | 一時音声ディレクトリ |
 | `WHISPER_LANG` | No | デフォルト言語（省略時 `ja`） |
@@ -57,6 +58,7 @@ WHISPER_LANGS=ja,en
 ```env
 WHISPER_BIN=/Users/taiki714/Desktop/whisper/whisper.cpp/build/bin/whisper-cli
 WHISPER_MODEL=/Users/taiki714/Desktop/whisper/whisper.cpp/models/ggml-large-v3-turbo-q8_0.bin
+WHISPER_MODEL2=/Users/taiki714/Desktop/whisper/whisper.cpp/models/ggml-small-q8_0.bin
 FFMPEG_BIN=ffmpeg
 WHISPER_LANG=ja
 WHISPER_LANGS=ja,en
@@ -177,6 +179,8 @@ Home の **手動 / 自動** トグルでモードを切り替えます（`minut
 ## GDモード（ライブ）
 
 Home の **GDモード** を開くと、先にライブ画面です（分析の出航準備は右上の **出航準備**）。議論中の見た目だけを確かめる画面で、2トラック音声はまだ使いません。約12分のダミー発言が、実時間で流れます。
+
+本番の文字起こしは **文字起こし: 速い / 精密** で切り替えます。初期値は速い方（`WHISPER_MODEL2`）。精密は Home と同じ `WHISPER_MODEL` です。選択は `minutes.gd.whisperModelKey.v1` に残ります。`WHISPER_MODEL2` が空なら速いも精密と同じモデルになります。
 
 1. お題に、目指す結論を一行で入れる（例: 一人でも当日動ける案内を渡す）
 2. **開始**。左が他者、右が自分。新しい発言が上に出て、古い発言は下へ押し出される

@@ -10,6 +10,7 @@ import {
   stripTimestamps,
 } from '@/lib/whisper-diarize';
 import { parseWhisperSegments } from '@/lib/diarize-parse';
+import { resolveWhisperModelPath } from '@/lib/whisper-model';
 
 export const runtime = 'nodejs';
 
@@ -53,13 +54,11 @@ function runProcess(
 
 export async function POST(req: Request) {
   const whisperBin = requireEnv('WHISPER_BIN');
-  const whisperModel = requireEnv('WHISPER_MODEL');
   const ffmpegBin = requireEnv('FFMPEG_BIN') ?? 'ffmpeg';
   const tempDir = requireEnv('TEMP_DIR') ?? path.join(os.tmpdir(), 'minutes-temp');
   const langConfig = getWhisperLangConfig();
-  const diarize = getDiarizeConfig(whisperModel ?? '');
 
-  if (!whisperBin || !whisperModel) {
+  if (!whisperBin) {
     return NextResponse.json(
       {
         error:
@@ -79,6 +78,27 @@ export async function POST(req: Request) {
   const file = formData.get('file');
   if (!file || !(file instanceof Blob)) {
     return NextResponse.json({ error: '音声ファイルが見つかりません。' }, { status: 400 });
+  }
+
+  const requestedModel = formData.get('modelKey');
+  const modelKeyField =
+    typeof requestedModel === 'string'
+      ? requestedModel
+      : requestedModel == null
+        ? new URL(req.url).searchParams.get('modelKey')
+        : String(requestedModel);
+  const picked = resolveWhisperModelPath(modelKeyField);
+  const whisperModel = picked.path;
+  const diarize = getDiarizeConfig(whisperModel ?? '');
+
+  if (!whisperModel) {
+    return NextResponse.json(
+      {
+        error:
+          'WHISPER_BIN と WHISPER_MODEL を .env.local に設定してください（.env.example 参照）。',
+      },
+      { status: 500 }
+    );
   }
 
   const requestedLang = formData.get('lang');
@@ -156,6 +176,11 @@ export async function POST(req: Request) {
     return NextResponse.json({
       text: plainText,
       lang: whisperLang,
+      model: {
+        key: picked.key,
+        label: picked.label,
+        fallback: picked.fallback,
+      },
       turns: parsed.turns,
       segments: parseWhisperSegments(stdout),
       hasDiarizeMarks: parsed.hasDiarizeMarks,
