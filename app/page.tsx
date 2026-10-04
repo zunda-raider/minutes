@@ -63,11 +63,18 @@ import { GdScreen } from './gd-screen';
 import {
   SYSTEM_AUDIO_HELP,
   acquireSystemAudio,
+  beginCaptureSession,
+  captureSessionCount,
   hasLiveAudio,
+  isCaptureStale,
+  markCaptureStale,
+  openRecordedSlice,
   openSelfMic,
+  primeCaptureTap,
   reviveHeldCapture,
   pickRecorderMimeType,
   stopMediaTracks,
+  watchDeadSystemCapture,
 } from '@/lib/zoom-capture';
 import {
   captureGeneration,
@@ -772,7 +779,18 @@ export default function Home() {
 
     const mimeType = mimeTypeRef.current;
     chunksRef.current = [];
-    const recorder = trackRecorder(new MediaRecorder(stream, { mimeType }));
+    const systemSlice = openRecordedSlice(stream);
+    let recorder: MediaRecorder;
+    try {
+      recorder = trackRecorder(new MediaRecorder(systemSlice?.stream ?? stream, { mimeType }));
+    } catch (err) {
+      console.warn('system recorder failed:', err);
+      systemSlice?.release();
+      setError('録音を開始できませんでした。');
+      wantRecordingRef.current = false;
+      setIsRecording(false);
+      return;
+    }
 
     const micStream = micStreamRef.current;
     let micRecorder: MediaRecorder | null = null;
@@ -781,16 +799,22 @@ export default function Home() {
       micStream != null &&
       audioSourceRef.current === 'system' &&
       micStream.getAudioTracks().some((t) => t.readyState === 'live');
+    const micSlice = micLive && micStream ? openRecordedSlice(micStream) : null;
     if (micLive && micStream) {
       try {
-        micRecorder = trackRecorder(new MediaRecorder(micStream, { mimeType }));
+        micRecorder = trackRecorder(
+          new MediaRecorder(micSlice?.stream ?? micStream, { mimeType })
+        );
         micRecorder.ondataavailable = (e) => {
           if (e.data.size > 0) micChunks.push(e.data);
         };
       } catch (err) {
         console.warn('self mic recorder failed:', err);
+        micSlice?.release();
         micRecorder = null;
       }
+    } else {
+      micSlice?.release();
     }
     micRecorderRef.current = micRecorder;
     segmentManualRef.current = false;
@@ -841,7 +865,19 @@ export default function Home() {
       setIsRecording(false);
     };
 
+    const endWatch =
+      audioSourceRef.current === 'system'
+        ? watchDeadSystemCapture(stream, () => {
+            if (epoch !== queueEpochRef.current) return;
+            setError(
+              'システム音声が無音のままです。停止してからもう一度録音すると、共有を取り直します。'
+            );
+          })
+        : null;
+
     recorder.onstop = () => {
+      systemSlice?.release();
+      endWatch?.();
       systemBlob = new Blob(chunksRef.current, { type: mimeType });
       chunksRef.current = [];
       systemDone = true;
@@ -859,28 +895,44 @@ export default function Home() {
 
     if (micRecorder) {
       micRecorder.onstop = () => {
+        micSlice?.release();
         micBlob = micChunks.length > 0 ? new Blob(micChunks, { type: mimeType }) : null;
         micDone = true;
         finishSegment();
       };
       micRecorder.onerror = () => {
         console.warn('self mic recorder error; continuing without auto 自分');
+        micSlice?.release();
         micBlob = null;
         micDone = true;
         finishSegment();
       };
     }
 
-    recorder.start(1000);
+    try {
+      recorder.start(1000);
+    } catch (err) {
+      console.warn('system recorder start failed:', err);
+      systemSlice?.release();
+      micSlice?.release();
+      endWatch?.();
+      setError('録音を開始できませんでした。');
+      wantRecordingRef.current = false;
+      setIsRecording(false);
+      return;
+    }
     mediaRecorderRef.current = recorder;
     if (micRecorder && micRecorder.state === 'inactive') {
       try {
         micRecorder.start(1000);
       } catch (err) {
         console.warn('self mic start failed:', err);
+        micSlice?.release();
         micRecorderRef.current = null;
         micDone = true;
       }
+    } else if (!micRecorder) {
+      micSlice?.release();
     }
   }, [enqueueTranscribe]);
 
@@ -926,7 +978,10 @@ export default function Home() {
     // A previous halt may have left the held share live but disabled.
     reviveHeldCapture(stream);
     reviveHeldCapture(micStreamRef.current);
-    const reuse = hasLiveAudio(stream) && heldSourceRef.current === source;
+    const reuse =
+      hasLiveAudio(stream) &&
+      heldSourceRef.current === source &&
+      !isCaptureStale(stream);
 
     if (!reuse || !stream) {
       if (streamRef.current || micStreamRef.current) stopTracks();
@@ -993,6 +1048,20 @@ export default function Home() {
 
     streamRef.current = stream;
     mimeTypeRef.current = pickRecorderMimeType();
+    if (source === 'system') {
+      const primed = await primeCaptureTap(stream);
+      if (
+        captureSessionCount(stream) >= 1 &&
+        (primed !== 'ok' || isCaptureStale(stream))
+      ) {
+        if (!isCaptureStale(stream)) markCaptureStale(stream, `prime-${primed}`);
+        stopTracks();
+        setError('システム音声を取り直します。もう一度録音を押してください。');
+        return;
+      }
+      if (micStreamRef.current) await primeCaptureTap(micStreamRef.current);
+      beginCaptureSession(stream);
+    }
     wantRecordingRef.current = true;
     bindLiveWatch(stream);
     rotateAfterStopRef.current = false;

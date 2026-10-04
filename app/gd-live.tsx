@@ -14,8 +14,12 @@ import { transcribeZoomChunk } from '@/lib/transcribe-zoom';
 import {
   SYSTEM_AUDIO_HELP,
   acquireSystemAudio,
+  captureSessionCount,
   hasLiveAudio,
+  isCaptureStale,
+  markCaptureStale,
   openSelfMic,
+  primeCaptureTap,
   reviveHeldCapture,
   startZoomSegmentRecorder,
   stopMediaTracks,
@@ -195,6 +199,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
   const [arming, setArming] = useState(false);
   const armingRef = useRef(false);
   const [notice, setNotice] = useState('');
+  const [shareStale, setShareStale] = useState(false);
   const [micWarn, setMicWarn] = useState('');
   const [modelKey, setModelKey] = useState<WhisperModelKey>(2);
   const [gdStage, setGdStage] = useState<GdStage>(GD_STAGES[0]);
@@ -440,6 +445,44 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     });
   }
 
+  function holdShare(stream: MediaStream, mic: MediaStream | null) {
+    systemRef.current = stream;
+    micRef.current = mic;
+    const watched = [stream, mic].filter((item): item is MediaStream => item != null);
+    releaseRef.current?.();
+    releaseRef.current = watchLiveCapture(() => {
+      releasingRef.current = true;
+      const current = captureRef.current;
+      captureRef.current = null;
+      if (current) current.stop();
+      stopMediaTracks(stream, mic);
+      if (systemRef.current === stream) systemRef.current = null;
+      if (micRef.current === mic) micRef.current = null;
+      releasingRef.current = false;
+      if (!aliveRef.current) return;
+      setPhase((currentPhase) =>
+        currentPhase === 'live' || currentPhase === 'paused' ? 'ended' : currentPhase
+      );
+    }, watched);
+    stream.getAudioTracks().forEach((track) => {
+      track.onended = () => {
+        if (releasingRef.current || systemRef.current !== stream) return;
+        if (hasLiveAudio(stream)) return;
+        releaseRef.current?.();
+        releaseRef.current = null;
+        captureRef.current = null;
+        stopMediaTracks(stream, micRef.current);
+        systemRef.current = null;
+        micRef.current = null;
+        if (!aliveRef.current) return;
+        if (phaseRef.current === 'live' || phaseRef.current === 'paused') {
+          setNotice('画面共有が終了したため録音を停止しました。');
+          endSessionRef.current();
+        }
+      };
+    });
+  }
+
   function armCapture(stream: MediaStream, mic: MediaStream | null, timeOffsetSec: number) {
     systemRef.current = stream;
     micRef.current = mic;
@@ -484,6 +527,11 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
       segmentMs: GD_LIVE_SEGMENT_MS,
       timeOffsetSec,
       onChunk: (chunk) => enqueueChunk(chunk, epoch),
+      onSilentCapture: () => {
+        if (!aliveRef.current) return;
+        setShareStale(true);
+        setNotice('システム音声が無音のままです。共有し直すで取り直してください。');
+      },
       onEnded: (reason) => {
         resolveFlushRef.current?.();
         resolveFlushRef.current = null;
@@ -526,6 +574,76 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     return { handle, failedSync };
   }
 
+  async function acquireFresh(
+    generation: number
+  ): Promise<{ stream: MediaStream; mic: MediaStream | null } | null> {
+    const selfMicPromise = openSelfMic();
+    let stream: MediaStream;
+    try {
+      stream = await acquireSystemAudio();
+    } catch (err) {
+      const leftover = await selfMicPromise;
+      stopMediaTracks(leftover);
+      console.error('GD live capture failed:', err);
+      if (aliveRef.current) setNotice(captureErrorMessage(err));
+      return null;
+    }
+    const mic = await selfMicPromise;
+    if (!aliveRef.current || generation !== captureGeneration()) {
+      stopMediaTracks(stream, mic);
+      return null;
+    }
+    return { stream, mic };
+  }
+
+  /**
+   * Reuse a held share only when it still has audible tracks and the hot tap
+   * is running. A stale or silent-reuse share is stopped (tracks and
+   * AudioContext) and getDisplayMedia runs again — still inside this click.
+   */
+  async function resolveShare(
+    generation: number
+  ): Promise<{ stream: MediaStream; mic: MediaStream | null } | null> {
+    const stream = systemRef.current;
+    let mic = micRef.current;
+    reviveHeldCapture(stream);
+    reviveHeldCapture(mic);
+    let reuse = hasLiveAudio(stream) && !isCaptureStale(stream);
+    if (reuse && stream) {
+      const primed = await primeCaptureTap(stream);
+      const broken =
+        isCaptureStale(stream) ||
+        (primed !== 'ok' && captureSessionCount(stream) >= 1);
+      if (broken) {
+        if (!isCaptureStale(stream)) markCaptureStale(stream, `prime-${primed}`);
+        reuse = false;
+      }
+    }
+    if (reuse && stream) {
+      if (!hasLiveAudio(mic)) {
+        stopMediaTracks(mic);
+        micRef.current = null;
+        mic = await openSelfMic();
+        if (!aliveRef.current || generation !== captureGeneration()) {
+          stopMediaTracks(mic);
+          return null;
+        }
+      }
+      if (mic) await primeCaptureTap(mic);
+      return { stream, mic };
+    }
+    // One picker per click. A brand-new share is kept even if the hot tap
+    // could not start; the raw track still records the first session.
+    stopMediaTracks(stream, mic);
+    systemRef.current = null;
+    micRef.current = null;
+    const fresh = await acquireFresh(generation);
+    if (!fresh) return null;
+    await primeCaptureTap(fresh.stream);
+    if (fresh.mic) await primeCaptureTap(fresh.mic);
+    return fresh;
+  }
+
   async function start() {
     if (phaseRef.current === 'live' || armingRef.current) return;
     const resuming = phaseRef.current === 'paused';
@@ -541,39 +659,9 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     setMicWarn('');
 
     try {
-      let stream = systemRef.current;
-      let mic = micRef.current;
-      reviveHeldCapture(stream);
-      reviveHeldCapture(mic);
-      if (!hasLiveAudio(stream)) {
-        stopMediaTracks(stream, mic);
-        systemRef.current = null;
-        micRef.current = null;
-        const selfMicPromise = openSelfMic();
-        try {
-          stream = await acquireSystemAudio();
-        } catch (err) {
-          const leftover = await selfMicPromise;
-          stopMediaTracks(leftover);
-          console.error('GD live capture failed:', err);
-          if (aliveRef.current) setNotice(captureErrorMessage(err));
-          return;
-        }
-        mic = await selfMicPromise;
-        if (!aliveRef.current || generation !== captureGeneration()) {
-          stopMediaTracks(stream, mic);
-          return;
-        }
-      } else if (!hasLiveAudio(mic)) {
-        stopMediaTracks(mic);
-        micRef.current = null;
-        mic = await openSelfMic();
-        if (!aliveRef.current || generation !== captureGeneration()) {
-          stopMediaTracks(mic);
-          return;
-        }
-      }
-
+      const held = await resolveShare(generation);
+      if (!held) return;
+      const { stream, mic } = held;
       const aborted =
         !aliveRef.current ||
         endingRef.current ||
@@ -584,6 +672,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
         if (micRef.current !== mic) stopMediaTracks(mic);
         return;
       }
+      setShareStale(false);
       setMicWarn(mic ? '' : MIC_WARN);
       const offsetSec = resuming ? elapsedRef.current / 1000 : 0;
       const armed = armCapture(stream, mic, offsetSec);
@@ -599,6 +688,55 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
       utterancesRef.current = [];
       setUtterances([]);
       beginClock();
+    } finally {
+      armingRef.current = false;
+      if (aliveRef.current) setArming(false);
+    }
+  }
+
+  async function reshare() {
+    if (armingRef.current) return;
+    const generation = captureGeneration();
+    const wasLive = phaseRef.current === 'live';
+    armingRef.current = true;
+    setArming(true);
+    setNotice('');
+    try {
+      if (wasLive) {
+        const flush = flushRef.current;
+        captureRef.current?.stop();
+        captureRef.current = null;
+        await Promise.race([
+          flush,
+          new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 2000);
+          }),
+        ]);
+      }
+      if (!aliveRef.current || generation !== captureGeneration()) return;
+      stopMediaTracks(systemRef.current, micRef.current);
+      systemRef.current = null;
+      micRef.current = null;
+      const fresh = await acquireFresh(generation);
+      if (!fresh) return;
+      await primeCaptureTap(fresh.stream);
+      if (fresh.mic) await primeCaptureTap(fresh.mic);
+      if (!aliveRef.current || generation !== captureGeneration() || endingRef.current) {
+        stopMediaTracks(fresh.stream, fresh.mic);
+        return;
+      }
+      setShareStale(false);
+      setMicWarn(fresh.mic ? '' : MIC_WARN);
+      if (wasLive && phaseRef.current === 'live') {
+        const armed = armCapture(fresh.stream, fresh.mic, elapsedRef.current / 1000);
+        if (!aliveRef.current || armed.failedSync) {
+          armed.handle?.stop();
+          return;
+        }
+        captureRef.current = armed.handle;
+        return;
+      }
+      holdShare(fresh.stream, fresh.mic);
     } finally {
       armingRef.current = false;
       if (aliveRef.current) setArming(false);
@@ -828,6 +966,16 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
             >
               {arming ? '許可待ち' : phase === 'paused' ? '再開' : '開始'}
             </button>
+            {shareStale ? (
+              <button
+                type="button"
+                className={styles.reshare}
+                onClick={() => void reshare()}
+                disabled={arming}
+              >
+                共有し直す
+              </button>
+            ) : null}
             <button type="button" className={styles.pause} onClick={pause} disabled={!running}>
               中断
             </button>
