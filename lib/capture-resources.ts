@@ -2,7 +2,7 @@
  * Resources that keep the tab hot after 停止 or a share-end.
  * Hard halt (`haltLiveCapture`) bumps the generation, runs hooks, then
  * `finishHardHalt` so nothing here can outlive the click.
- * Soft stop (Home Record/Stop, GD 終了) must clear its own rotate interval
+ * Soft stop (Home Record/Stop, GD 中断 / 終了) must clear its own rotate interval
  * and must not call finish — the share stays up on purpose.
  */
 

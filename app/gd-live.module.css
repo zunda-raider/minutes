@@ -80,6 +80,7 @@
 .harbor,
 .navBtn,
 .go,
+.pause,
 .stop,
 .speed,
 .speedOn {
@@ -164,6 +165,10 @@
   background: #5eead4;
 }
 
+.phase[data-phase='paused'] {
+  background: #fbbf24;
+}
+
 .phase[data-phase='ended'] {
   background: #fda4af;
 }
@@ -201,6 +206,7 @@
 }
 
 .go,
+.pause,
 .stop {
   min-height: 36px;
   padding: 0.2rem 0.9rem;
@@ -215,6 +221,13 @@
   box-shadow: 0 3px 0 #0f766e;
 }
 
+.pause {
+  border: 0;
+  color: #1a1208;
+  background: linear-gradient(180deg, #fde68a, #f59e0b);
+  box-shadow: 0 3px 0 #b45309;
+}
+
 .stop {
   border: 0;
   color: #2a0a12;
@@ -223,6 +236,7 @@
 }
 
 .go:disabled,
+.pause:disabled,
 .stop:disabled,
 .speed:disabled,
 .speedOn:disabled {

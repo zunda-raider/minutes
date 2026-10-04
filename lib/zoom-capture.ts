@@ -65,16 +65,35 @@ export async function openSelfMic(): Promise<MediaStream | null> {
 const displayRoots = new WeakMap<MediaStream, MediaStream>();
 
 /**
- * True when the stream still has a live, enabled audio track (safe to record
- * again). A disabled track is not reusable: Chrome keeps it `live` but the
- * next MediaRecorder writes silence.
+ * True when the stream still has a live, enabled, unmuted audio track (safe
+ * to record again). A disabled track is not reusable: Chrome keeps it `live`
+ * but the next MediaRecorder writes silence. A muted track is the same
+ * silence and will not clear until the capturer is replaced.
  */
 export function hasLiveAudio(
   stream: MediaStream | null | undefined
 ): stream is MediaStream {
   return !!stream?.getAudioTracks().some(
+    (track) => track.readyState === 'live' && track.enabled && !track.muted
+  );
+}
+
+/**
+ * MediaRecorder bound to a stream that has already been stopped often writes
+ * silence if it is handed that same stream object again. Wrap the live
+ * audible tracks in a fresh stream. Do not clone the tracks: stopping a
+ * display-audio clone can end the original capturer.
+ */
+function recorderInput(source: MediaStream): MediaStream | null {
+  reviveHeldCapture(source);
+  // Muted-but-live is not fatal here. A segment rotate that treated mute as
+  // death would drop the share mid-discussion. The next 開始 / 再開 refuses
+  // a muted track in hasLiveAudio and re-acquires instead.
+  const tracks = source.getAudioTracks().filter(
     (track) => track.readyState === 'live' && track.enabled
   );
+  if (tracks.length === 0) return null;
+  return new MediaStream(tracks);
 }
 
 /**
@@ -178,11 +197,14 @@ export function startZoomSegmentRecorder(opts: {
   system: MediaStream;
   mic: MediaStream | null;
   segmentMs?: number;
+  /** Added to every chunk so a resumed GD continues the same timeline. */
+  timeOffsetSec?: number;
   onChunk: (chunk: ZoomChunk) => void;
   onEnded?: (reason: 'stopped' | 'share-ended' | 'error') => void;
 }): ZoomRecorder {
   const mimeType = pickRecorderMimeType();
   const segmentMs = opts.segmentMs ?? ZOOM_SEGMENT_MS;
+  const timeOffsetSec = opts.timeOffsetSec ?? 0;
   const origin = performance.now();
   let want = true;
   let rotate = false;
@@ -225,9 +247,14 @@ export function startZoomSegmentRecorder(opts: {
 
   const arm = () => {
     if (!want || ended) return;
-    reviveHeldCapture(opts.system);
-    reviveHeldCapture(opts.mic);
-    const offsetSec = (performance.now() - origin) / 1000;
+    const systemInput = recorderInput(opts.system);
+    const micInput = opts.mic ? recorderInput(opts.mic) : null;
+    if (!systemInput) {
+      reason = 'error';
+      finish();
+      return;
+    }
+    const offsetSec = timeOffsetSec + (performance.now() - origin) / 1000;
     const systemChunks: Blob[] = [];
     const micChunks: Blob[] = [];
     let systemBlob: Blob | null = null;
@@ -238,7 +265,7 @@ export function startZoomSegmentRecorder(opts: {
 
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(opts.system, { mimeType });
+      recorder = new MediaRecorder(systemInput, { mimeType });
     } catch (err) {
       console.warn('system recorder failed:', err);
       reason = 'error';
@@ -247,13 +274,10 @@ export function startZoomSegmentRecorder(opts: {
     }
     systemRecorder = trackRecorder(recorder);
 
-    const micLive =
-      opts.mic != null &&
-      opts.mic.getAudioTracks().some((track) => track.readyState === 'live');
     let nextMic: MediaRecorder | null = null;
-    if (micLive && opts.mic) {
+    if (micInput) {
       try {
-        nextMic = trackRecorder(new MediaRecorder(opts.mic, { mimeType }));
+        nextMic = trackRecorder(new MediaRecorder(micInput, { mimeType }));
         nextMic.ondataavailable = (event) => {
           if (event.data.size > 0) micChunks.push(event.data);
         };
