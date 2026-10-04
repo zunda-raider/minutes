@@ -207,7 +207,8 @@
 
 .go,
 .pause,
-.stop {
+.stop,
+.reshare {
   min-height: 36px;
   padding: 0.2rem 0.9rem;
   font-weight: 800;
@@ -235,9 +236,17 @@
   box-shadow: 0 3px 0 #9f1239;
 }
 
+.reshare {
+  border: 1px solid #f6d48a;
+  color: #1a1208;
+  background: #f6d48a;
+  box-shadow: 0 3px 0 #b45309;
+}
+
 .go:disabled,
 .pause:disabled,
 .stop:disabled,
+.reshare:disabled,
 .speed:disabled,
 .speedOn:disabled {
   opacity: 0.45;

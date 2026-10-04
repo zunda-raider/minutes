@@ -11,9 +11,17 @@ import {
   rememberStream,
   silenceRecorder,
   stopStreamTracks,
+  trackAnalyser,
+  trackAudioContext,
+  trackAudioNode,
   trackInterval,
   trackRecorder,
 } from '@/lib/capture-resources';
+import {
+  classifyCapturePeak,
+  HEARD_PEAK,
+  type CaptureLevel,
+} from '@/lib/capture-level';
 
 export const ZOOM_SEGMENT_MS = 60_000;
 
@@ -80,20 +88,352 @@ export function hasLiveAudio(
 
 /**
  * MediaRecorder bound to a stream that has already been stopped often writes
- * silence if it is handed that same stream object again. Wrap the live
- * audible tracks in a fresh stream. Do not clone the tracks: stopping a
- * display-audio clone can end the original capturer.
+ * silence if it is handed that same stream object again. A fresh MediaStream
+ * around the same MediaStreamTrack is not enough: after the first recorder
+ * stops, Chrome (ScreenCaptureKit / the system-audio capturer) keeps the
+ * track `live`, enabled, and unmuted, but stops delivering samples until a
+ * consumer that is NOT a second MediaRecorder is attached.
+ *
+ * The hot tap is that consumer. It stays connected across 中断, 終了, and
+ * segment rotation. Each recorder gets its own destination node so a stopped
+ * recorder cannot pin the capturer. Do not clone the display tracks: stopping
+ * a clone ends the original. Do not close the AudioContext on a soft stop.
  */
-function recorderInput(source: MediaStream): MediaStream | null {
+type CaptureMeta = {
+  everHeard: boolean;
+  stale: boolean;
+  notified: boolean;
+  sessions: number;
+  segmentsThisSession: number;
+  onDead: ((info: { peak: number; early: boolean }) => void) | null;
+};
+
+type CaptureTap = {
+  ctx: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  analyser: AnalyserNode;
+  buf: Float32Array;
+  peak: number;
+  timer: ReturnType<typeof setInterval>;
+};
+
+const captureMeta = new WeakMap<MediaStream, CaptureMeta>();
+const captureTaps = new WeakMap<MediaStream, CaptureTap>();
+
+function metaOf(stream: MediaStream): CaptureMeta {
+  let meta = captureMeta.get(stream);
+  if (!meta) {
+    meta = {
+      everHeard: false,
+      stale: false,
+      notified: false,
+      sessions: 0,
+      segmentsThisSession: 0,
+      onDead: null,
+    };
+    captureMeta.set(stream, meta);
+  }
+  return meta;
+}
+
+export function describeAudio(stream: MediaStream | null | undefined): string {
+  if (!stream) return 'no-stream';
+  const tracks = stream.getAudioTracks();
+  if (tracks.length === 0) return 'no-audio-track';
+  return tracks
+    .map(
+      (track) =>
+        `${track.readyState}:enabled=${track.enabled}:muted=${track.muted}:id=${track.id}`
+    )
+    .join(',');
+}
+
+export function isCaptureStale(stream: MediaStream | null | undefined): boolean {
+  if (!stream) return false;
+  return captureMeta.get(stream)?.stale === true;
+}
+
+export function captureSessionCount(stream: MediaStream | null | undefined): number {
+  if (!stream) return 0;
+  return captureMeta.get(stream)?.sessions ?? 0;
+}
+
+export function markCaptureStale(
+  stream: MediaStream | null | undefined,
+  why: string
+) {
+  if (!stream) return;
+  const meta = metaOf(stream);
+  meta.stale = true;
+  console.warn('[capture] stale share', why, describeAudio(stream));
+}
+
+function flagDeadCapture(
+  stream: MediaStream,
+  why: string,
+  peak: number,
+  early: boolean
+) {
+  const meta = metaOf(stream);
+  meta.stale = true;
+  if (meta.notified) return;
+  meta.notified = true;
+  console.warn('[capture] silent reuse', {
+    why,
+    peak,
+    early,
+    tracks: describeAudio(stream),
+  });
+  meta.onDead?.({ peak, early });
+}
+
+function sampleTap(stream: MediaStream, tap: CaptureTap) {
+  if (tap.ctx.state === 'closed') return;
+  reviveHeldCapture(stream);
+  let max = 0;
+  try {
+    tap.analyser.getFloatTimeDomainData(tap.buf);
+    for (let i = 0; i < tap.buf.length; i += 1) {
+      const value = Math.abs(tap.buf[i] ?? 0);
+      if (value > max) max = value;
+    }
+  } catch {
+    return;
+  }
+  if (max > tap.peak) tap.peak = max;
+  const meta = metaOf(stream);
+  if (tap.peak >= HEARD_PEAK) meta.everHeard = true;
+  // Re-enable anything a previous halt left disabled. Do not treat a mute
+  // edge as death here: Chrome mutes display audio until the first sample,
+  // and a transient mute must not force 共有し直す. Stuck mute is digital
+  // silence and the segment watcher flags it on a reused share.
+}
+
+function createTap(stream: MediaStream): CaptureTap | null {
+  const existing = captureTaps.get(stream);
+  if (existing) {
+    if (existing.ctx.state !== 'closed') return existing;
+    metaOf(stream).stale = true;
+    closeCaptureTap(stream, true);
+    console.warn('[capture] AudioContext closed on a held share', describeAudio(stream));
+    return null;
+  }
+  if (typeof AudioContext === 'undefined') return null;
+  reviveHeldCapture(stream);
+  const tracks = stream
+    .getAudioTracks()
+    .filter((track) => track.readyState === 'live' && track.enabled);
+  if (tracks.length === 0) return null;
+  let ctx: AudioContext;
+  try {
+    ctx = trackAudioContext(new AudioContext());
+  } catch (err) {
+    console.warn('[capture] AudioContext failed:', err);
+    return null;
+  }
+  let source: MediaStreamAudioSourceNode;
+  try {
+    source = ctx.createMediaStreamSource(new MediaStream(tracks));
+  } catch (err) {
+    console.warn('[capture] media stream source failed:', err);
+    void ctx.close().catch(() => {});
+    return null;
+  }
+  trackAudioNode(source);
+  const keeper = trackAudioNode(ctx.createMediaStreamDestination());
+  const analyser = trackAnalyser(ctx.createAnalyser());
+  analyser.fftSize = 2048;
+  try {
+    source.connect(keeper);
+    source.connect(analyser);
+  } catch (err) {
+    console.warn('[capture] tap connect failed:', err);
+    void ctx.close().catch(() => {});
+    return null;
+  }
+  const tap: CaptureTap = {
+    ctx,
+    source,
+    analyser,
+    buf: new Float32Array(analyser.fftSize),
+    peak: 0,
+    timer: setInterval(() => {
+      sampleTap(stream, tap);
+    }, 200),
+  };
+  trackInterval(tap.timer);
+  captureTaps.set(stream, tap);
+  void ctx.resume().catch((err) => {
+    console.warn('[capture] AudioContext resume failed:', err);
+  });
+  console.info('[capture] hot tap', describeAudio(stream), ctx.state);
+  return tap;
+}
+
+/**
+ * Keep the capturer pulling. Call from the 開始 / 再開 gesture so resume()
+ * still counts as user activation. Soft stop must not close this context.
+ */
+export async function primeCaptureTap(
+  stream: MediaStream | null | undefined
+): Promise<'ok' | 'suspended' | 'missing'> {
+  if (!stream) return 'missing';
+  const tap = createTap(stream);
+  if (!tap) return 'missing';
+  if (tap.ctx.state === 'suspended') {
+    try {
+      await tap.ctx.resume();
+    } catch (err) {
+      console.warn('[capture] AudioContext resume failed:', err);
+    }
+  }
+  if (tap.ctx.state !== 'running') {
+    console.warn('[capture] AudioContext not running', tap.ctx.state, describeAudio(stream));
+    return 'suspended';
+  }
+  return 'ok';
+}
+
+export type RecordedSlice = {
+  stream: MediaStream;
+  release: () => void;
+};
+
+/**
+ * A new destination for one MediaRecorder. The hot tap stays up after release.
+ * Null when the graph is not running — caller may record the raw tracks once,
+ * and must re-acquire instead of reusing a dead share.
+ */
+export function openRecordedSlice(source: MediaStream): RecordedSlice | null {
+  const tap = captureTaps.get(source);
+  if (!tap || tap.ctx.state === 'closed') return null;
+  if (tap.ctx.state === 'suspended') {
+    void tap.ctx.resume().catch(() => {});
+  }
+  if (tap.ctx.state !== 'running') return null;
+  const dest = tap.ctx.createMediaStreamDestination();
+  try {
+    tap.source.connect(dest);
+  } catch (err) {
+    console.warn('[capture] slice connect failed:', err);
+    return null;
+  }
+  let released = false;
+  return {
+    stream: dest.stream,
+    release: () => {
+      if (released) return;
+      released = true;
+      try {
+        tap.source.disconnect(dest);
+      } catch {
+        /* already disconnected */
+      }
+    },
+  };
+}
+
+function rawRecorderInput(source: MediaStream): MediaStream | null {
   reviveHeldCapture(source);
-  // Muted-but-live is not fatal here. A segment rotate that treated mute as
-  // death would drop the share mid-discussion. The next 開始 / 再開 refuses
-  // a muted track in hasLiveAudio and re-acquires instead.
-  const tracks = source.getAudioTracks().filter(
-    (track) => track.readyState === 'live' && track.enabled
-  );
+  const tracks = source
+    .getAudioTracks()
+    .filter((track) => track.readyState === 'live' && track.enabled);
   if (tracks.length === 0) return null;
   return new MediaStream(tracks);
+}
+
+function recorderInput(source: MediaStream): RecordedSlice | null {
+  const slice = openRecordedSlice(source);
+  if (slice) return slice;
+  const raw = rawRecorderInput(source);
+  if (!raw) return null;
+  console.warn('[capture] recording raw tracks; hot tap unavailable', describeAudio(source));
+  return { stream: raw, release: () => {} };
+}
+
+/** One user start / 再開 / next 開始. Segment rotation must not call this. */
+export function beginCaptureSession(stream: MediaStream | null | undefined) {
+  if (!stream) return;
+  const meta = metaOf(stream);
+  meta.sessions += 1;
+  meta.segmentsThisSession = 0;
+  console.info(
+    '[capture] session',
+    meta.sessions,
+    meta.stale ? 'stale' : 'ok',
+    describeAudio(stream)
+  );
+}
+
+/**
+ * Digital silence on a reused share (session >= 2). The first segment also
+ * checks after 2.5s so 再開 does not wait out a full Whisper slice.
+ * Slices shorter than 8s (a quick 中断) are not evidence.
+ */
+export function watchDeadSystemCapture(
+  stream: MediaStream,
+  onDead: (info: { peak: number; early: boolean }) => void
+): () => void {
+  const tap = captureTaps.get(stream);
+  if (!tap || tap.ctx.state !== 'running') return () => {};
+  const meta = metaOf(stream);
+  meta.onDead = onDead;
+  const segmentIndex = meta.segmentsThisSession;
+  meta.segmentsThisSession += 1;
+  const session = meta.sessions;
+  tap.peak = 0;
+  const started = performance.now();
+  let cancel = false;
+  const judge = (early: boolean): CaptureLevel => {
+    if (cancel && early) return 'quiet';
+    // Only the first slice of a start/再開 is checked early. Later slices
+    // wait for the full segment so a short pause between turns is not death.
+    if (early && segmentIndex !== 0) return 'quiet';
+    const verdict = classifyCapturePeak(tap.peak, meta.everHeard);
+    if (verdict === 'dead') {
+      flagDeadCapture(
+        stream,
+        `${early ? 'early' : 'segment'}:session=${session}:index=${segmentIndex}`,
+        tap.peak,
+        early
+      );
+    }
+    return verdict;
+  };
+  const earlyTimer = setTimeout(() => {
+    judge(true);
+  }, 2500);
+  return () => {
+    if (cancel) return;
+    cancel = true;
+    clearTimeout(earlyTimer);
+    if (performance.now() - started < 8000) return;
+    judge(false);
+  };
+}
+
+function closeCaptureTap(stream: MediaStream, keepMeta: boolean) {
+  const tap = captureTaps.get(stream);
+  if (tap) {
+    captureTaps.delete(stream);
+    clearTrackedInterval(tap.timer);
+    try {
+      tap.source.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    try {
+      tap.analyser.disconnect();
+    } catch {
+      /* already disconnected */
+    }
+    try {
+      void tap.ctx.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  if (!keepMeta) captureMeta.delete(stream);
 }
 
 /**
@@ -133,6 +473,9 @@ export function stopMediaTracks(...streams: Array<MediaStream | null | undefined
     }
   }
   for (const stream of pending) {
+    // Drop the hot tap before stop(). A live AudioContext keeps the device
+    // (and a dead-but-live track) pinned after 停止.
+    closeCaptureTap(stream, false);
     forgetStream(stream);
     // Audio before video. Chrome ignores videoTrack.stop() while system audio
     // is live, so a video stop during acquire does not actually end the capturer.
@@ -201,6 +544,8 @@ export function startZoomSegmentRecorder(opts: {
   timeOffsetSec?: number;
   onChunk: (chunk: ZoomChunk) => void;
   onEnded?: (reason: 'stopped' | 'share-ended' | 'error') => void;
+  /** Reused share produced digital silence, or the track looks live but dead. */
+  onSilentCapture?: (info: { peak: number; early: boolean }) => void;
 }): ZoomRecorder {
   const mimeType = pickRecorderMimeType();
   const segmentMs = opts.segmentMs ?? ZOOM_SEGMENT_MS;
@@ -223,11 +568,20 @@ export function startZoomSegmentRecorder(opts: {
     timer = null;
   };
 
+  let notedSession = false;
+  let endWatch: (() => void) | null = null;
+  const stopWatch = () => {
+    const end = endWatch;
+    endWatch = null;
+    end?.();
+  };
+
   const finish = () => {
     if (ended) return;
     ended = true;
     want = false;
     clearTimer();
+    stopWatch();
     const mic = micRecorder;
     micRecorder = null;
     // If the system recorder never reached onstop, the self-mic recorder would
@@ -247,6 +601,7 @@ export function startZoomSegmentRecorder(opts: {
 
   const arm = () => {
     if (!want || ended) return;
+    stopWatch();
     const systemInput = recorderInput(opts.system);
     const micInput = opts.mic ? recorderInput(opts.mic) : null;
     if (!systemInput) {
@@ -265,9 +620,11 @@ export function startZoomSegmentRecorder(opts: {
 
     let recorder: MediaRecorder;
     try {
-      recorder = new MediaRecorder(systemInput, { mimeType });
+      recorder = new MediaRecorder(systemInput.stream, { mimeType });
     } catch (err) {
       console.warn('system recorder failed:', err);
+      systemInput.release();
+      micInput?.release();
       reason = 'error';
       finish();
       return;
@@ -277,7 +634,7 @@ export function startZoomSegmentRecorder(opts: {
     let nextMic: MediaRecorder | null = null;
     if (micInput) {
       try {
-        nextMic = trackRecorder(new MediaRecorder(micInput, { mimeType }));
+        nextMic = trackRecorder(new MediaRecorder(micInput.stream, { mimeType }));
         nextMic.ondataavailable = (event) => {
           if (event.data.size > 0) micChunks.push(event.data);
         };
@@ -285,6 +642,7 @@ export function startZoomSegmentRecorder(opts: {
         micRecorder = nextMic;
       } catch (err) {
         console.warn('self mic recorder failed:', err);
+        micInput?.release();
         nextMic = null;
         micRecorder = null;
         micDone = true;
@@ -313,12 +671,15 @@ export function startZoomSegmentRecorder(opts: {
       if (event.data.size > 0) systemChunks.push(event.data);
     };
     recorder.onerror = () => {
+      systemInput.release();
       reason = 'error';
       want = false;
       rotate = false;
       finish();
     };
     recorder.onstop = () => {
+      systemInput.release();
+      stopWatch();
       systemBlob = new Blob(systemChunks, { type: mimeType });
       systemDone = true;
       if (nextMic && nextMic.state === 'recording') {
@@ -335,12 +696,14 @@ export function startZoomSegmentRecorder(opts: {
 
     if (nextMic) {
       nextMic.onstop = () => {
+        micInput?.release();
         micBlob = micChunks.length > 0 ? new Blob(micChunks, { type: mimeType }) : null;
         micDone = true;
         finishSegment();
       };
       nextMic.onerror = () => {
         console.warn('self mic recorder error; continuing without auto 自分');
+        micInput?.release();
         micBlob = null;
         micDone = true;
         finishSegment();
@@ -351,20 +714,32 @@ export function startZoomSegmentRecorder(opts: {
       recorder.start(1000);
     } catch (err) {
       console.warn('system recorder start failed:', err);
+      systemInput.release();
+      micInput?.release();
       reason = 'error';
       finish();
       return;
     }
+    if (!notedSession) {
+      notedSession = true;
+      beginCaptureSession(opts.system);
+    }
+    endWatch = watchDeadSystemCapture(opts.system, (info) => {
+      opts.onSilentCapture?.(info);
+    });
     if (nextMic && nextMic.state === 'inactive') {
       try {
         nextMic.start(1000);
       } catch (err) {
         console.warn('self mic start failed:', err);
         silenceRecorder(nextMic);
+        micInput?.release();
         nextMic = null;
         if (micRecorder && micRecorder.state === 'inactive') micRecorder = null;
         micDone = true;
       }
+    } else if (!nextMic) {
+      micInput?.release();
     }
   };
 
