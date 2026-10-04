@@ -66,7 +66,8 @@ import {
   pickRecorderMimeType,
   stopMediaTracks,
 } from '@/lib/zoom-capture';
-import { haltLiveCapture, useLiveCaptureOn, watchLiveCapture } from '@/lib/live-capture';
+import { watchLiveCapture } from '@/lib/live-capture';
+import { StopShareButton } from './stop-share';
 
 type LangOption = { code: string; label: string };
 
@@ -208,7 +209,6 @@ function readTextSelection(): { hits: string[]; spans: Map<string, TextSpan> } |
 
 export default function Home() {
   const [isRecording, setIsRecording] = useState(false);
-  const shareOn = useLiveCaptureOn();
   const [pendingCount, setPendingCount] = useState(0);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState('');
@@ -867,13 +867,13 @@ export default function Home() {
     streamRef.current = stream;
     mimeTypeRef.current = pickRecorderMimeType();
     wantRecordingRef.current = true;
-    if (audioSource === 'system') {
-      releaseLiveRef.current?.();
-      const watched = [stream, selfMic].filter((item): item is MediaStream => item != null);
-      releaseLiveRef.current = watchLiveCapture(() => {
-        stopRecordingRef.current();
-      }, watched);
-    }
+    releaseLiveRef.current?.();
+    const watched = [stream, micStreamRef.current].filter(
+      (item): item is MediaStream => item != null
+    );
+    releaseLiveRef.current = watchLiveCapture(() => {
+      stopRecordingRef.current();
+    }, watched);
     rotateAfterStopRef.current = false;
 
     stream.getAudioTracks().forEach((track) => {
@@ -925,7 +925,12 @@ export default function Home() {
       setIsRecording(false);
       return;
     }
-    recorder.stop();
+    try {
+      recorder.stop();
+    } catch {
+      stopTracks();
+      setIsRecording(false);
+    }
   };
   stopRecordingRef.current = stopRecording;
 
@@ -1824,16 +1829,7 @@ export default function Home() {
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
         <div className={styles.topMeta}>
-          {shareOn ? (
-            <button
-              type="button"
-              className="haltShare"
-              aria-label="録音と画面共有を停止"
-              onClick={() => haltLiveCapture()}
-            >
-              停止
-            </button>
-          ) : null}
+          <StopShareButton />
           <span className={styles.metaChip}>{entries.length} segments</span>
           <span className={styles.metaChip}>Copy all = 古い順</span>
         </div>
@@ -1939,25 +1935,15 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
-          {shareOn ? (
-            <button
-              type="button"
-              className="haltShare"
-              aria-label="録音と画面共有を停止"
-              onClick={() => haltLiveCapture()}
-            >
-              停止
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={styles.gdEntry}
-              onClick={() => setScreen('gd')}
-            >
-              <span className={styles.gdEntryBadge}>出航</span>
-              GDモード
-            </button>
-          )}
+          <StopShareButton />
+          <button
+            type="button"
+            className={styles.gdEntry}
+            onClick={() => setScreen('gd')}
+          >
+            <span className={styles.gdEntryBadge}>出航</span>
+            GDモード
+          </button>
         </div>
       </header>
 
