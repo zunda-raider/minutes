@@ -140,6 +140,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
 
 
   if (deck === 'score' && shownScore) {
+    const isMock = shownScore.transcript === '' || shownScore.lineCount === 0;
     return (
       <GdResult
         goal={shownScore.goal}
@@ -147,6 +148,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
         genre={genre}
         selfCount={shownScore.selfCount}
         lineCount={shownScore.lineCount}
+        forceMock={isMock}
         onBack={onBack}
         onLive={() => setDeck('live')}
       />
@@ -189,8 +191,12 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
         onVoyage={() => setDeck('voyage')}
         resultReady={scoreSession != null}
         onResult={() => {
-          const session = scoreRef.current;
-          if (!session) return;
+          const session = scoreRef.current ?? {
+            goal: 'リモートワークは生産性を上げるか？',
+            transcript: '',
+            selfCount: 0,
+            lineCount: 0,
+          };
           setShownScore(session);
           setDeck('score');
         }}
