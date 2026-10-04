@@ -48,6 +48,34 @@ export async function openSelfMic(): Promise<MediaStream | null> {
  * Screen/window/tab share with system audio. Video tracks are stopped so
  * Whisper only sees audio.
  */
+/** Audio-only stream -> original display capture, so 停止 can end video too. */
+const displayRoots = new WeakMap<MediaStream, MediaStream>();
+
+/** Stop every track on these streams, including the display capture they came from. */
+export function stopMediaTracks(...streams: Array<MediaStream | null | undefined>) {
+  const pending: MediaStream[] = [];
+  const seen = new Set<MediaStream>();
+  for (const stream of streams) {
+    if (!stream || seen.has(stream)) continue;
+    seen.add(stream);
+    pending.push(stream);
+    const root = displayRoots.get(stream);
+    if (root && !seen.has(root)) {
+      seen.add(root);
+      pending.push(root);
+    }
+  }
+  for (const stream of pending) {
+    for (const track of stream.getTracks()) {
+      try {
+        track.stop();
+      } catch {
+        /* already ended */
+      }
+    }
+  }
+}
+
 export async function acquireSystemAudio(): Promise<MediaStream> {
   const options: DisplayMediaOptionsWithSystemAudio = {
     video: true,
@@ -57,14 +85,17 @@ export async function acquireSystemAudio(): Promise<MediaStream> {
   };
   const displayStream = await navigator.mediaDevices.getDisplayMedia(options);
   const audioTracks = displayStream.getAudioTracks();
+  // Drop frames now. The display stream stays linked so 停止 can end the share.
   displayStream.getVideoTracks().forEach((track) => track.stop());
 
   if (audioTracks.length === 0) {
-    displayStream.getTracks().forEach((track) => track.stop());
+    stopMediaTracks(displayStream);
     throw new NoSystemAudioError();
   }
 
-  return new MediaStream(audioTracks);
+  const audioOnly = new MediaStream(audioTracks);
+  displayRoots.set(audioOnly, displayStream);
+  return audioOnly;
 }
 
 export type ZoomChunk = {
@@ -100,8 +131,7 @@ export function startZoomSegmentRecorder(opts: {
   let systemRecorder: MediaRecorder | null = null;
 
   const stopTracks = () => {
-    opts.system.getTracks().forEach((track) => track.stop());
-    opts.mic?.getTracks().forEach((track) => track.stop());
+    stopMediaTracks(opts.system, opts.mic);
   };
 
   const finish = () => {
