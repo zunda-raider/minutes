@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { spawn } from 'child_process';
+import type { ChildProcess } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
@@ -11,45 +11,21 @@ import {
 } from '@/lib/whisper-diarize';
 import { parseWhisperSegments } from '@/lib/diarize-parse';
 import { resolveWhisperModelPath } from '@/lib/whisper-model';
+import { ProcessAbortedError, killChildTree, runCancellableProcess } from '@/lib/spawn-cancellable';
+import { registerTranscribeJob } from '@/lib/transcribe-jobs';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 function requireEnv(name: string): string | null {
   const value = process.env[name]?.trim();
   return value ? value : null;
 }
 
-function runProcess(
-  command: string,
-  args: string[],
-  label: string
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args);
-    let stdout = '';
-    let stderr = '';
+const JOB_ID = /^[A-Za-z0-9-]{8,80}$/;
 
-    proc.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString();
-    });
-    proc.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString();
-    });
-    proc.on('error', (err) => {
-      reject(new Error(`${label} を起動できませんでした: ${err.message}`));
-    });
-    proc.on('close', (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(
-          new Error(
-            `${label} が失敗しました (exit ${code})${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
-          )
-        );
-      }
-    });
-  });
+function abortedResponse() {
+  return NextResponse.json({ error: 'aborted', aborted: true }, { status: 499 });
 }
 
 export async function POST(req: Request) {
@@ -115,11 +91,36 @@ export async function POST(req: Request) {
   }
   const whisperLang = resolved.lang;
 
+  const rawJobId = formData.get('jobId');
+  const jobId = typeof rawJobId === 'string' && JOB_ID.test(rawJobId) ? rawJobId : '';
+
   const id = `audio-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const webmPath = path.join(tempDir, `${id}.webm`);
   const wavPath = path.join(tempDir, `${id}.wav`);
 
+  const active = new Set<ChildProcess>();
+  let stopped = req.signal.aborted;
+  const stopChildren = () => {
+    stopped = true;
+    for (const proc of active) killChildTree(proc);
+  };
+  const onRequestAbort = () => stopChildren();
+  req.signal.addEventListener('abort', onRequestAbort);
+  const unregisterJob = jobId ? registerTranscribeJob(jobId, stopChildren) : () => {};
+
+  const run = (command: string, args: string[], label: string) =>
+    runCancellableProcess(command, args, label, {
+      signal: req.signal,
+      shouldStop: () => stopped,
+      onSpawn: (proc) => {
+        active.add(proc);
+        proc.on('close', () => active.delete(proc));
+        if (stopped) killChildTree(proc);
+      },
+    });
+
   try {
+    if (stopped) return abortedResponse();
     await fs.mkdir(tempDir, { recursive: true });
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -128,7 +129,7 @@ export async function POST(req: Request) {
     }
     await fs.writeFile(webmPath, buffer);
 
-    await runProcess(
+    await run(
       ffmpegBin,
       ['-y', '-i', webmPath, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wavPath],
       'ffmpeg'
@@ -142,7 +143,7 @@ export async function POST(req: Request) {
 
     if (wantDiarizeArgs) {
       try {
-        const result = await runProcess(
+        const result = await run(
           whisperBin,
           [...baseArgs, ...diarize.args],
           'whisper-cli'
@@ -150,18 +151,21 @@ export async function POST(req: Request) {
         stdout = result.stdout;
         usedDiarize = true;
       } catch (diarizeErr) {
+        if (stopped || req.signal.aborted || diarizeErr instanceof ProcessAbortedError) {
+          throw diarizeErr;
+        }
         console.warn('diarize whisper failed; retrying without:', diarizeErr);
         const msg =
           diarizeErr instanceof Error ? diarizeErr.message : String(diarizeErr);
         diarizeWarning =
           (diarizeWarning ? diarizeWarning + ' ' : '') +
           `自動話者分けオプションが使えないため通常文字起こしにフォールバックしました。（${msg.slice(0, 180)}）`;
-        const result = await runProcess(whisperBin, baseArgs, 'whisper-cli');
+        const result = await run(whisperBin, baseArgs, 'whisper-cli');
         stdout = result.stdout;
         usedDiarize = false;
       }
     } else {
-      const result = await runProcess(whisperBin, baseArgs, 'whisper-cli');
+      const result = await run(whisperBin, baseArgs, 'whisper-cli');
       stdout = result.stdout;
     }
 
@@ -192,10 +196,17 @@ export async function POST(req: Request) {
       },
     });
   } catch (err) {
+    if (stopped || req.signal.aborted || err instanceof ProcessAbortedError) {
+      console.info('transcribe aborted; killed ffmpeg/whisper-cli');
+      return abortedResponse();
+    }
     console.error('transcribe error:', err);
     const message = err instanceof Error ? err.message : '文字起こしに失敗しました。';
     return NextResponse.json({ error: message }, { status: 500 });
   } finally {
+    req.signal.removeEventListener('abort', onRequestAbort);
+    unregisterJob();
+    stopChildren();
     await Promise.allSettled([fs.unlink(webmPath), fs.unlink(wavPath)]);
   }
 }
