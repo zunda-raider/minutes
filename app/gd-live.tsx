@@ -15,13 +15,14 @@ import { transcribeZoomChunk } from '@/lib/transcribe-zoom';
 import {
   SYSTEM_AUDIO_HELP,
   acquireSystemAudio,
+  hasLiveAudio,
   openSelfMic,
   startZoomSegmentRecorder,
   stopMediaTracks,
   type ZoomChunk,
   type ZoomRecorder,
 } from '@/lib/zoom-capture';
-import { haltLiveCapture, watchLiveCapture } from '@/lib/live-capture';
+import { watchLiveCapture } from '@/lib/live-capture';
 import { StopShareButton } from './stop-share';
 
 /** Real Zoom capture only. Home / minutes stays at about 60s. */
@@ -148,7 +149,9 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const topicSeq = useRef(1);
   const captureRef = useRef<ZoomRecorder | null>(null);
   const releaseRef = useRef<(() => void) | null>(null);
-  const streamsRef = useRef<MediaStream[]>([]);
+  const systemRef = useRef<MediaStream | null>(null);
+  const micRef = useRef<MediaStream | null>(null);
+  const releasingRef = useRef(false);
   const aliveRef = useRef(true);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const feedRef = useRef<Feed>('live');
@@ -160,13 +163,13 @@ export function GdLive({ onBack, onHarbor }: Props) {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
-      const streams = streamsRef.current;
       releaseRef.current?.();
       releaseRef.current = null;
       captureRef.current?.stop();
       captureRef.current = null;
-      stopMediaTracks(...streams);
-      streamsRef.current = [];
+      stopMediaTracks(systemRef.current, micRef.current);
+      systemRef.current = null;
+      micRef.current = null;
     };
   }, []);
 
@@ -241,77 +244,22 @@ export function GdLive({ onBack, onHarbor }: Props) {
     });
   }
 
-  function onCaptureEnded(reason: 'stopped' | 'share-ended' | 'error') {
-    captureRef.current = null;
-    releaseRef.current?.();
-    releaseRef.current = null;
-    streamsRef.current = [];
-    if (!aliveRef.current) return;
-    if (reason === 'share-ended') {
-      setNotice('画面共有が終了したため録音を停止しました。');
-    } else if (reason === 'error') {
-      setNotice('録音中にエラーが発生しました。');
-    }
-    setPhase((current) => (current === 'live' ? 'ended' : current));
-  }
-
-  async function start() {
-    if (phase === 'live' || arming) return;
-    setNotice('');
-    if (feedRef.current === 'demo') {
-      setMicWarn('');
-      releaseRef.current?.();
-      releaseRef.current = watchLiveCapture(() => {
-        releaseRef.current = null;
-        const ms = Math.min(
-          GD_LIVE_DURATION_MS,
-          baseRef.current + (performance.now() - originRef.current) * speedRef.current
-        );
-        baseRef.current = ms;
-        elapsedRef.current = ms;
-        setElapsedMs(ms);
-        if (!aliveRef.current) return;
-        setPhase((current) => (current === 'live' ? 'ended' : current));
-      }, []);
-      beginClock();
-      return;
-    }
-
-    setArming(true);
-    setMicWarn('');
-    speedRef.current = 1;
-    setSpeed(1);
-    const selfMicPromise = openSelfMic();
-    let stream: MediaStream;
-    try {
-      stream = await acquireSystemAudio();
-    } catch (err) {
-      const leftover = await selfMicPromise;
-      leftover?.getTracks().forEach((track) => track.stop());
-      console.error('GD live capture failed:', err);
-      if (aliveRef.current) setNotice(captureErrorMessage(err));
-      setArming(false);
-      return;
-    }
-
-    const mic = await selfMicPromise;
-    if (!aliveRef.current) {
-      stopMediaTracks(stream, mic);
-      setArming(false);
-      return;
-    }
-    if (!mic) setMicWarn(MIC_WARN);
-
+  function armCapture(stream: MediaStream, mic: MediaStream | null) {
+    systemRef.current = stream;
+    micRef.current = mic;
     const watched = [stream, mic].filter((item): item is MediaStream => item != null);
-    streamsRef.current = watched;
     let handle: ZoomRecorder | null = null;
     releaseRef.current?.();
     releaseRef.current = watchLiveCapture(() => {
+      releasingRef.current = true;
       const current = handle ?? captureRef.current;
       handle = null;
       captureRef.current = null;
       if (current) current.stop();
-      else stopMediaTracks(stream, mic);
+      stopMediaTracks(stream, mic);
+      if (systemRef.current === stream) systemRef.current = null;
+      if (micRef.current === mic) micRef.current = null;
+      releasingRef.current = false;
       if (!aliveRef.current) return;
       if (phaseRef.current === 'live') {
         const ms = Math.min(
@@ -333,24 +281,124 @@ export function GdLive({ onBack, onHarbor }: Props) {
       onChunk: enqueueChunk,
       onEnded: (reason) => {
         failedSync = true;
-        onCaptureEnded(reason);
+        handle = null;
+        captureRef.current = null;
+        if (reason === 'stopped') return;
+        releaseRef.current?.();
+        releaseRef.current = null;
+        if (systemRef.current === stream) systemRef.current = null;
+        if (micRef.current === mic) micRef.current = null;
+        if (!aliveRef.current) return;
+        if (reason === 'share-ended') {
+          setNotice('画面共有が終了したため録音を停止しました。');
+        } else if (reason === 'error') {
+          setNotice('録音中にエラーが発生しました。');
+        }
+        setPhase((current) => (current === 'live' ? 'ended' : current));
       },
     });
-    setArming(false);
-    if (!aliveRef.current || failedSync) {
-      handle.stop();
+    stream.getAudioTracks().forEach((track) => {
+      const prev = track.onended;
+      track.onended = (event) => {
+        prev?.call(track, event);
+        if (releasingRef.current || systemRef.current !== stream) return;
+        if (hasLiveAudio(stream)) return;
+        releaseRef.current?.();
+        releaseRef.current = null;
+        captureRef.current = null;
+        stopMediaTracks(stream, micRef.current);
+        systemRef.current = null;
+        micRef.current = null;
+        if (!aliveRef.current) return;
+        if (phaseRef.current === 'live') {
+          setNotice('画面共有が終了したため録音を停止しました。');
+          setPhase('ended');
+        }
+      };
+    });
+    return { handle, failedSync };
+  }
+
+  async function start() {
+    if (phase === 'live' || arming) return;
+    setNotice('');
+    if (feedRef.current === 'demo') {
+      setMicWarn('');
+      releaseRef.current?.();
+      const held = [systemRef.current, micRef.current].filter(
+        (item): item is MediaStream => item != null
+      );
+      releaseRef.current = watchLiveCapture(() => {
+        releasingRef.current = true;
+        releaseRef.current = null;
+        stopMediaTracks(systemRef.current, micRef.current);
+        systemRef.current = null;
+        micRef.current = null;
+        releasingRef.current = false;
+        const ms = Math.min(
+          GD_LIVE_DURATION_MS,
+          baseRef.current + (performance.now() - originRef.current) * speedRef.current
+        );
+        baseRef.current = ms;
+        elapsedRef.current = ms;
+        setElapsedMs(ms);
+        if (!aliveRef.current) return;
+        setPhase((current) => (current === 'live' ? 'ended' : current));
+      }, held);
+      beginClock();
       return;
     }
-    captureRef.current = handle;
+
+    setArming(true);
+    setMicWarn('');
+    speedRef.current = 1;
+    setSpeed(1);
+
+    let stream = systemRef.current;
+    let mic = micRef.current;
+    if (!hasLiveAudio(stream)) {
+      stopMediaTracks(stream, mic);
+      systemRef.current = null;
+      micRef.current = null;
+      const selfMicPromise = openSelfMic();
+      try {
+        stream = await acquireSystemAudio();
+      } catch (err) {
+        const leftover = await selfMicPromise;
+        leftover?.getTracks().forEach((track) => track.stop());
+        console.error('GD live capture failed:', err);
+        if (aliveRef.current) setNotice(captureErrorMessage(err));
+        setArming(false);
+        return;
+      }
+      mic = await selfMicPromise;
+      if (!aliveRef.current) {
+        stopMediaTracks(stream, mic);
+        setArming(false);
+        return;
+      }
+    } else if (!hasLiveAudio(mic)) {
+      mic = await openSelfMic();
+      if (!aliveRef.current) {
+        mic?.getTracks().forEach((track) => track.stop());
+        setArming(false);
+        return;
+      }
+    }
+
+    setMicWarn(mic ? '' : MIC_WARN);
+    const armed = armCapture(stream, mic);
+    setArming(false);
+    if (!aliveRef.current || armed.failedSync) {
+      armed.handle.stop();
+      return;
+    }
+    captureRef.current = armed.handle;
     setUtterances([]);
     beginClock();
   }
 
   function stop() {
-    if (releaseRef.current) {
-      haltLiveCapture();
-      return;
-    }
     if (phase !== 'live') return;
     const ms = Math.min(
       GD_LIVE_DURATION_MS,

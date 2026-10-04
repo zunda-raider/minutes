@@ -17,7 +17,8 @@ function emit() {
 
 /**
  * Mic Home, Zoom Home, and GD live share one 停止.
- * `stop` ends that mode's MediaRecorder; every display, system-audio, and mic track is stopped too.
+ * `stop` is the hard halt for that mode (recorder, then its tracks).
+ * Ordinary end keeps the MediaStream and leaves this registration in place.
  */
 export function watchLiveCapture(stop: () => void, streams: MediaStream[]): () => void {
   const entry: Entry = { stop, streams };
@@ -31,7 +32,7 @@ export function watchLiveCapture(stop: () => void, streams: MediaStream[]): () =
   };
 }
 
-/** End every mic, Zoom, and GD recorder, then stop all of their tracks. */
+/** Hard stop: end every recorder, then stop display, system-audio, and mic tracks. */
 export function haltLiveCapture() {
   const snapshot = [...entries];
   entries.clear();
