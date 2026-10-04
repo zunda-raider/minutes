@@ -75,13 +75,26 @@ export function rmsRange(
 }
 
 export async function decodeMonoPcm(
-  blob: Blob
+  blob: Blob,
+  signal?: AbortSignal
 ): Promise<{ samples: Float32Array; sampleRate: number } | null> {
+  if (signal?.aborted) return null;
   if (typeof AudioContext === 'undefined') return null;
   const ctx = trackAudioContext(new AudioContext());
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    void ctx.close().catch(() => {});
+  };
+  const onAbort = () => close();
+  signal?.addEventListener('abort', onAbort);
   try {
+    if (signal?.aborted) return null;
     const buf = await blob.arrayBuffer();
+    if (signal?.aborted) return null;
     const audio = await ctx.decodeAudioData(buf.slice(0));
+    if (signal?.aborted) return null;
     const frames = audio.length;
     if (frames === 0) return null;
     if (audio.numberOfChannels === 1) {
@@ -98,10 +111,11 @@ export async function decodeMonoPcm(
     }
     return { samples: mixed, sampleRate: audio.sampleRate };
   } catch (err) {
-    console.warn('decodeMonoPcm failed:', err);
+    if (!signal?.aborted) console.warn('decodeMonoPcm failed:', err);
     return null;
   } finally {
-    await ctx.close().catch(() => {});
+    signal?.removeEventListener('abort', onAbort);
+    close();
   }
 }
 
@@ -112,12 +126,19 @@ export async function decodeMonoPcm(
 export async function speakersFromMicEnergy(
   systemBlob: Blob,
   micBlob: Blob,
-  windows: EnergyWindow[]
+  windows: EnergyWindow[],
+  signal?: AbortSignal
 ): Promise<Array<{ text: string; speakerId?: number }>> {
+  if (signal?.aborted) {
+    return windows.map((w) => ({ text: w.text }));
+  }
   const [systemPcm, micPcm] = await Promise.all([
-    decodeMonoPcm(systemBlob),
-    decodeMonoPcm(micBlob),
+    decodeMonoPcm(systemBlob, signal),
+    decodeMonoPcm(micBlob, signal),
   ]);
+  if (signal?.aborted) {
+    return windows.map((w) => ({ text: w.text }));
+  }
   if (!systemPcm || !micPcm) {
     return windows.map((w) => ({ text: w.text }));
   }

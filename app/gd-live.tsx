@@ -171,6 +171,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const micRef = useRef<MediaStream | null>(null);
   const releasingRef = useRef(false);
   const aliveRef = useRef(true);
+  const cancelClockRef = useRef<(() => void) | null>(null);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const queueEpochRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -248,14 +249,15 @@ export function GdLive({ onBack, onHarbor }: Props) {
       frame = 0;
     };
     const untrack = trackClock(cancel);
+    cancelClockRef.current = cancel;
     const loop = () => {
       if (dead) return;
       const ms =
         baseRef.current + (performance.now() - originRef.current) * speedRef.current;
       if (ms >= GD_LIVE_DURATION_MS) {
-        const release = releaseRef.current;
-        releaseRef.current = null;
-        release?.();
+        // Same as 終了: stop the clock and the recorder, keep the share so
+        // top-bar 停止 can still end display video, system audio, and the mic.
+        cancel();
         baseRef.current = GD_LIVE_DURATION_MS;
         elapsedRef.current = GD_LIVE_DURATION_MS;
         setElapsedMs(GD_LIVE_DURATION_MS);
@@ -264,10 +266,12 @@ export function GdLive({ onBack, onHarbor }: Props) {
       }
       elapsedRef.current = ms;
       setElapsedMs(ms);
+      if (dead) return;
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => {
+      if (cancelClockRef.current === cancel) cancelClockRef.current = null;
       cancel();
       untrack();
     };
@@ -457,7 +461,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
         stream = await acquireSystemAudio();
       } catch (err) {
         const leftover = await selfMicPromise;
-        leftover?.getTracks().forEach((track) => track.stop());
+        stopMediaTracks(leftover);
         console.error('GD live capture failed:', err);
         if (aliveRef.current) setNotice(captureErrorMessage(err));
         setArming(false);
@@ -492,6 +496,10 @@ export function GdLive({ onBack, onHarbor }: Props) {
 
   function stop() {
     if (phase !== 'live') return;
+    // Soft stop. Drops the silence-clock rAF and the segment timer now.
+    // The share stays registered so 停止 can still kill it. Chunks already
+    // cut still transcribe; nothing new is queued once the recorder stops.
+    cancelClockRef.current?.();
     const ms = Math.min(
       GD_LIVE_DURATION_MS,
       baseRef.current + (performance.now() - originRef.current) * speedRef.current

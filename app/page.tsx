@@ -71,6 +71,7 @@ import {
 import {
   captureGeneration,
   clearTrackedInterval,
+  ensureRecorderStops,
   registerHaltHook,
   rememberStream,
   trackAbort,
@@ -78,6 +79,7 @@ import {
   trackRecorder,
 } from '@/lib/capture-resources';
 import { watchLiveCapture } from '@/lib/live-capture';
+import { postTranscribe } from '@/lib/transcribe-fetch';
 import { StopShareButton } from './stop-share';
 
 type LangOption = { code: string; label: string };
@@ -534,12 +536,14 @@ export default function Home() {
         formData.append('lang', langRef.current);
         formData.append('modelKey', '1');
 
-        const res = await fetch('/api/transcribe', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        });
-        if (queueEpochRef.current !== epoch) break;
+        const res = await postTranscribe(formData, controller.signal);
+        if (
+          queueEpochRef.current !== epoch ||
+          controller.signal.aborted ||
+          res.status === 499
+        ) {
+          break;
+        }
 
         let data: {
           text?: string;
@@ -600,11 +604,17 @@ export default function Home() {
           // Per-Whisper-row cards stay on GD live (transcribe-zoom).
           // Mic-only jobs never carry micBlob, so they stay on the manual role.
           try {
+            if (controller.signal.aborted || queueEpochRef.current !== epoch) break;
             const timed: EnergyWindow[] = [
               { text, startSec: 0, endSec: Number.POSITIVE_INFINITY },
             ];
-            const tagged = await speakersFromMicEnergy(blob, job.micBlob!, timed);
-            if (queueEpochRef.current !== epoch) break;
+            const tagged = await speakersFromMicEnergy(
+              blob,
+              job.micBlob!,
+              timed,
+              controller.signal
+            );
+            if (queueEpochRef.current !== epoch || controller.signal.aborted) break;
             chunks = tagged.map((row) => ({
               text: row.text,
               speaker: row.speakerId,
@@ -623,8 +633,9 @@ export default function Home() {
         } else if (mode === 'auto' && text) {
           // Pitch / voice-height heuristic when tinydiarize unavailable
           try {
-            const analysis = await analyzeBlobPitch(blob);
-            if (queueEpochRef.current !== epoch) break;
+            if (controller.signal.aborted || queueEpochRef.current !== epoch) break;
+            const analysis = await analyzeBlobPitch(blob, controller.signal);
+            if (queueEpochRef.current !== epoch || controller.signal.aborted) break;
             const provisional = provisionalTurnsFromPitch(
               text,
               analysis,
@@ -919,7 +930,7 @@ export default function Home() {
         stream = await acquireAudioStream(source);
       } catch (e) {
         const leftover = await selfMicPromise;
-        leftover?.getTracks().forEach((track) => track.stop());
+        stopMediaTracks(leftover);
         const err = e as DOMException | Error;
         console.error('音声ソース取得エラー:', err);
         if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
@@ -953,7 +964,7 @@ export default function Home() {
           selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
         );
       } else {
-        selfMic?.getTracks().forEach((track) => track.stop());
+        stopMediaTracks(selfMic);
         micStreamRef.current = null;
         setSelfMicNote('');
       }
@@ -1025,6 +1036,8 @@ export default function Home() {
     }
   };
 
+  // Soft stop. Share (display + self mic) stays. Rotate timer is cleared so it
+  // cannot enqueue another chunk. Already queued Whisper jobs still finish.
   const stopRecording = () => {
     wantRecordingRef.current = false;
     rotateAfterStopRef.current = false;
@@ -1041,6 +1054,7 @@ export default function Home() {
           /* already stopped */
         }
       }
+      ensureRecorderStops(micRec);
       setIsRecording(false);
       return;
     }
@@ -1056,6 +1070,8 @@ export default function Home() {
       }
       setIsRecording(false);
     }
+    ensureRecorderStops(recorder);
+    ensureRecorderStops(micRec);
   };
   stopRecordingRef.current = stopRecording;
 

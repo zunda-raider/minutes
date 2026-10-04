@@ -2,7 +2,8 @@
  * Resources that keep the tab hot after 停止 or a share-end.
  * Hard halt (`haltLiveCapture`) bumps the generation, runs hooks, then
  * `finishHardHalt` so nothing here can outlive the click.
- * Soft stop must clear its own rotate interval; it must not call finish.
+ * Soft stop (Home Record/Stop, GD 終了) must clear its own rotate interval
+ * and must not call finish — the share stays up on purpose.
  */
 
 const intervals = new Set<ReturnType<typeof setInterval>>();
@@ -29,25 +30,45 @@ export function forgetStream(stream: MediaStream | null | undefined) {
   if (stream) streams.delete(stream);
 }
 
-/** Audio tracks first so a display-video stop is not ignored while audio is live. */
+function endTrack(track: MediaStreamTrack) {
+  try {
+    track.enabled = false;
+  } catch {
+    /* already dead */
+  }
+  try {
+    track.stop();
+  } catch {
+    /* already ended */
+  }
+}
+
+/**
+ * Audio tracks first. Chrome ignores videoTrack.stop() while system audio is
+ * still live, and macOS may not notice the audio stop until the next turn,
+ * so a still-live display track is stopped again on a microtask and a short timer.
+ */
 export function stopStreamTracks(stream: MediaStream) {
   const tracks = stream.getTracks();
-  const ordered = [
-    ...tracks.filter((track) => track.kind === 'audio'),
-    ...tracks.filter((track) => track.kind !== 'audio' && track.kind !== 'video'),
-    ...tracks.filter((track) => track.kind === 'video'),
-  ];
-  for (const track of ordered) {
-    try {
-      track.enabled = false;
-    } catch {
-      /* already dead */
+  const audio = tracks.filter((track) => track.kind === 'audio');
+  const video = tracks.filter((track) => track.kind === 'video');
+  const other = tracks.filter(
+    (track) => track.kind !== 'audio' && track.kind !== 'video'
+  );
+  const endVideo = () => {
+    for (const track of video) endTrack(track);
+  };
+  for (const track of audio) {
+    if (video.length > 0 && track.readyState === 'live') {
+      track.addEventListener('ended', endVideo, { once: true });
     }
-    try {
-      track.stop();
-    } catch {
-      /* already ended */
-    }
+    endTrack(track);
+  }
+  for (const track of other) endTrack(track);
+  endVideo();
+  if (video.some((track) => track.readyState !== 'ended')) {
+    queueMicrotask(endVideo);
+    setTimeout(endVideo, 50);
   }
 }
 
@@ -70,6 +91,27 @@ export function trackRecorder(recorder: MediaRecorder) {
   recorder.addEventListener('stop', drop, { once: true });
   recorder.addEventListener('error', drop, { once: true });
   return recorder;
+}
+
+/**
+ * MediaRecorder.stop() usually fires onstop and releases the encoder.
+ * If it doesn't, a soft stop would leave the self-mic recorder (and its
+ * device) running. One follow-up stop, not an interval.
+ */
+export function ensureRecorderStops(
+  recorder: MediaRecorder | null | undefined,
+  afterMs = 2000
+) {
+  if (!recorder || recorder.state === 'inactive') return;
+  setTimeout(() => {
+    if (recorder.state !== 'inactive') {
+      try {
+        recorder.stop();
+      } catch {
+        /* already stopping */
+      }
+    }
+  }, afterMs);
 }
 
 /** Drop handlers and force the recorder inactive so it cannot keep a device. */

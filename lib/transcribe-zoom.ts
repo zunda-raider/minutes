@@ -1,6 +1,7 @@
 import type { WhisperSegment } from '@/lib/diarize-parse';
 import type { LiveSpeaker } from '@/lib/gd-live-demo';
 import { SELF_SPEAKER_ID, speakersFromMicEnergy } from '@/lib/self-energy';
+import { postTranscribe } from '@/lib/transcribe-fetch';
 
 export type ZoomUtterance = {
   /** Seconds from the start of this audio chunk. */
@@ -37,7 +38,9 @@ export async function transcribeZoomChunk(
   formData.append('lang', lang);
   if (modelKey != null) formData.append('modelKey', String(modelKey));
 
-  const res = await fetch('/api/transcribe', { method: 'POST', body: formData, signal });
+  if (signal?.aborted) return [];
+  const res = await postTranscribe(formData, signal);
+  if (signal?.aborted || res.status === 499) return [];
   let data: TranscribePayload;
   try {
     data = (await res.json()) as TranscribePayload;
@@ -58,9 +61,10 @@ export async function transcribeZoomChunk(
   if (segments.length === 0) return [];
 
   let tagged: Array<{ text: string; speakerId?: number }>;
+  if (signal?.aborted) return [];
   if (micBlob && micBlob.size > 0) {
     try {
-      tagged = await speakersFromMicEnergy(systemBlob, micBlob, segments);
+      tagged = await speakersFromMicEnergy(systemBlob, micBlob, segments, signal);
     } catch (err) {
       console.warn('mic energy self-tag failed:', err);
       tagged = segments.map((segment) => ({ text: segment.text }));
@@ -68,6 +72,7 @@ export async function transcribeZoomChunk(
   } else {
     tagged = segments.map((segment) => ({ text: segment.text }));
   }
+  if (signal?.aborted) return [];
 
   const utterances: ZoomUtterance[] = [];
   tagged.forEach((row, index) => {

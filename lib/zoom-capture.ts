@@ -6,6 +6,7 @@
 
 import {
   clearTrackedInterval,
+  ensureRecorderStops,
   forgetStream,
   rememberStream,
   silenceRecorder,
@@ -354,6 +355,10 @@ export function startZoomSegmentRecorder(opts: {
     }
     // If nothing accepted stop(), no onstop is coming — end now so the timer stays dead.
     if (!stopping) finish();
+    // Soft stop keeps the tracks, so a recorder that never reaches onstop would
+    // keep encoding. Hard halt also silenceRecorder()s these immediately.
+    ensureRecorderStops(sys);
+    ensureRecorderStops(mic);
   };
 
   opts.system.getAudioTracks().forEach((track) => {

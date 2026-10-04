@@ -77,21 +77,36 @@ export type PitchAnalysis = {
   likelyMultiSpeaker: boolean;
 };
 
-export async function analyzeBlobPitch(blob: Blob): Promise<PitchAnalysis> {
+export async function analyzeBlobPitch(
+  blob: Blob,
+  signal?: AbortSignal
+): Promise<PitchAnalysis> {
   const empty: PitchAnalysis = {
     medianHz: null,
     windowPitches: [],
     likelyMultiSpeaker: false,
   };
+  if (signal?.aborted) return empty;
   if (typeof window === 'undefined' || typeof AudioContext === 'undefined') {
     return empty;
   }
 
   try {
     const ctx = trackAudioContext(new AudioContext());
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      void ctx.close().catch(() => undefined);
+    };
+    const onAbort = () => close();
+    signal?.addEventListener('abort', onAbort);
     try {
+      if (signal?.aborted) return empty;
       const buf = await blob.arrayBuffer();
+      if (signal?.aborted) return empty;
       const audio = await ctx.decodeAudioData(buf.slice(0));
+      if (signal?.aborted) return empty;
       const channel = audio.getChannelData(0);
       const sr = audio.sampleRate;
       const win = Math.max(256, Math.floor(sr * WINDOW_SEC));
@@ -99,6 +114,7 @@ export async function analyzeBlobPitch(blob: Blob): Promise<PitchAnalysis> {
       const windowPitches: Array<number | null> = [];
 
       for (let start = 0; start + win <= channel.length; start += hop) {
+        if (signal?.aborted) return empty;
         const slice = channel.subarray(start, start + win);
         // Downsample ~4x for speed
         const step = Math.max(1, Math.floor(sr / 8000));
@@ -125,10 +141,11 @@ export async function analyzeBlobPitch(blob: Blob): Promise<PitchAnalysis> {
 
       return { medianHz: med, windowPitches, likelyMultiSpeaker };
     } finally {
-      await ctx.close().catch(() => undefined);
+      signal?.removeEventListener('abort', onAbort);
+      close();
     }
   } catch (err) {
-    console.warn('pitch analysis failed:', err);
+    if (!signal?.aborted) console.warn('pitch analysis failed:', err);
     return empty;
   }
 }
