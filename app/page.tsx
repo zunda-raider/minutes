@@ -1339,7 +1339,7 @@ export default function Home() {
   );
 
   const translateEntry = async (entry: TranscriptEntry) => {
-    if (!isEnglishEntry(entry) || entry.textJa) return;
+    if (wantRecordingRef.current || !isEnglishEntry(entry) || entry.textJa) return;
 
     setTranslatingIds((prev) => new Set(prev).add(entry.id));
     try {
@@ -1350,6 +1350,7 @@ export default function Home() {
           text: entry.text,
           genre: genre.trim() || undefined,
           context: genre.trim() || undefined,
+          recording: wantRecordingRef.current,
         }),
       });
       const data = (await res.json()) as { textJa?: string; error?: string };
@@ -1744,7 +1745,7 @@ export default function Home() {
           type="button"
           className={styles.ghostButton}
           onClick={translateAllEnglish}
-          disabled={translatingIds.size > 0}
+          disabled={translatingIds.size > 0 || isRecording}
         >
           {translateConfigured
             ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
