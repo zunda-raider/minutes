@@ -850,3 +850,41 @@
   color: #fda4af;
 }
 
+
+.limit {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  margin: 0;
+  color: #f6d48a;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.limit input {
+  width: 3.6rem;
+  border-radius: 8px;
+  border: 1px solid rgba(246, 212, 138, 0.55);
+  background: #070605;
+  color: #f8f1e3;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  padding: 0.12rem 0.35rem;
+  text-align: right;
+}
+
+.limit input:focus-visible {
+  outline: 2px solid #f6d48a;
+  outline-offset: 1px;
+}
+
+.stageModel {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex: none;
+}

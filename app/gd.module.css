@@ -732,3 +732,229 @@
 .liveJump:hover {
   background: rgba(255, 244, 214, 0.14);
 }
+
+.scoreStage {
+  height: 100svh;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #f8f1e3;
+  background:
+    radial-gradient(820px 320px at 50% -18%, rgba(246, 212, 138, 0.16), transparent 60%),
+    #070605;
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", "Hiragino Sans", var(--font-geist-sans),
+    system-ui, sans-serif;
+}
+
+.scoreHud {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid rgba(246, 212, 138, 0.28);
+  background: rgba(7, 6, 5, 0.92);
+}
+
+.scoreHome,
+.scoreLive {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 212, 138, 0.4);
+  background: rgba(255, 244, 214, 0.06);
+  color: #f8f1e3;
+  min-height: 34px;
+  padding: 0.2rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.scoreHome {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.scoreChevron {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.scoreLive {
+  margin-left: auto;
+}
+
+.scoreKicker {
+  margin: 0;
+  color: #f6d48a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.scoreTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.1;
+  letter-spacing: 0.08em;
+}
+
+.scoreBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.85rem 0.9rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.scoreRoot {
+  padding: 0.7rem 0.8rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid rgba(246, 212, 138, 0.7);
+  background: rgba(246, 212, 138, 0.08);
+}
+
+.scoreRole {
+  margin: 0;
+  color: #f6d48a;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.scoreGoal,
+.scoreSummary {
+  margin: 0.35rem 0 0;
+  font-size: 0.98rem;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.scoreMuted,
+.scoreMeta,
+.scoreWarn {
+  margin: 0.4rem 0 0;
+  color: rgba(248, 241, 227, 0.62);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.scoreWarn {
+  color: #f6d48a;
+}
+
+.scoreTree {
+  list-style: none;
+  margin: 0 0 0 0.55rem;
+  padding: 0.15rem 0 0.15rem 0.15rem;
+  border-left: 2px solid rgba(246, 212, 138, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.scoreTree > li {
+  position: relative;
+  padding-left: 0.75rem;
+}
+
+.scoreTree > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 1.15rem;
+  width: 0.75rem;
+  border-top: 2px solid rgba(246, 212, 138, 0.5);
+}
+
+.axisNode {
+  padding: 0.65rem 0.75rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid rgba(246, 212, 138, 0.42);
+  background: linear-gradient(180deg, rgba(28, 20, 12, 0.94), rgba(7, 6, 5, 0.94));
+}
+
+.axisTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.axisTop h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.axisScore {
+  margin: 0;
+  color: #f6d48a;
+  font-variant-numeric: tabular-nums;
+}
+
+.axisScoreNum {
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.axisScoreDen {
+  margin-left: 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: rgba(246, 212, 138, 0.75);
+}
+
+.pips {
+  display: flex;
+  gap: 0.28rem;
+  margin-top: 0.45rem;
+}
+
+.pip,
+.pipOn {
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 212, 138, 0.55);
+  background: transparent;
+}
+
+.pipOn {
+  background: #f6d48a;
+  box-shadow: 0 0 8px rgba(246, 212, 138, 0.45);
+}
+
+.axisComment {
+  margin: 0.45rem 0 0;
+  color: rgba(248, 241, 227, 0.86);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.selfLines {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.selfLine {
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 241, 227, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
