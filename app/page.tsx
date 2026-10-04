@@ -62,6 +62,7 @@ import {
   SYSTEM_AUDIO_HELP,
   ZOOM_SEGMENT_MS,
   acquireSystemAudio,
+  hasLiveAudio,
   openSelfMic,
   pickRecorderMimeType,
   stopMediaTracks,
@@ -269,7 +270,11 @@ export default function Home() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  /** Source that owns streamRef, so a later Record can reuse it. */
+  const heldSourceRef = useRef<AudioSource | null>(null);
   const releaseLiveRef = useRef<(() => void) | null>(null);
+  const releasingRef = useRef(false);
+  const stopTracksRef = useRef<() => void>(() => {});
   const stopRecordingRef = useRef<() => void>(() => {});
   /** Parallel mic used only in Zoom/system mode, for 自分 energy — not STT. */
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -342,8 +347,16 @@ export default function Home() {
   useEffect(() => {
     return () => {
       if (segmentTimerRef.current) clearInterval(segmentTimerRef.current);
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      wantRecordingRef.current = false;
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        try {
+          recorder.stop();
+        } catch {
+          /* already stopped */
+        }
+      }
+      stopTracksRef.current();
     };
   }, []);
 
@@ -436,11 +449,13 @@ export default function Home() {
     audioSource === 'system' ? ZOOM_SEGMENT_MS : SEGMENT_MS_MIC;
 
   const stopTracks = () => {
+    releasingRef.current = true;
     releaseLiveRef.current?.();
     releaseLiveRef.current = null;
     stopMediaTracks(streamRef.current, micStreamRef.current);
     streamRef.current = null;
     micStreamRef.current = null;
+    heldSourceRef.current = null;
     const micRec = micRecorderRef.current;
     micRecorderRef.current = null;
     if (micRec && micRec.state !== 'inactive') {
@@ -450,7 +465,9 @@ export default function Home() {
         /* already stopped */
       }
     }
+    releasingRef.current = false;
   };
+  stopTracksRef.current = stopTracks;
 
   const clearSegmentTimer = () => {
     if (segmentTimerRef.current) {
@@ -735,7 +752,6 @@ export default function Home() {
       }
 
       if (!wantRecordingRef.current) {
-        stopTracks();
         setIsRecording(false);
       }
     };
@@ -814,90 +830,105 @@ export default function Home() {
     return acquireSystemAudio();
   };
 
-  const startRecording = async () => {
-    setError('');
-
-    let stream: MediaStream;
-    const wantSelfMic = audioSource === 'system';
-    const selfMicPromise = wantSelfMic ? openSelfMic() : Promise.resolve(null);
-    try {
-      stream = await acquireAudioStream(audioSource);
-    } catch (e) {
-      const leftover = await selfMicPromise;
-      leftover?.getTracks().forEach((track) => track.stop());
-      const err = e as DOMException | Error;
-      console.error('音声ソース取得エラー:', err);
-      if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
-        setError(
-          audioSource === 'system'
-            ? '画面共有がキャンセルされたか、許可されませんでした。'
-            : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
-        );
-        return;
-      }
-      if (err.name === 'NoSystemAudioError' || err.message === 'NO_SYSTEM_AUDIO') {
-        setError(SYSTEM_AUDIO_HELP);
-        return;
-      }
-      setError(
-        audioSource === 'system'
-          ? `アプリ / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`
-          : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
-      );
-      return;
-    }
-
-    const selfMic = await selfMicPromise;
-    if (wantSelfMic) {
-      if (selfMic) {
-        micStreamRef.current = selfMic;
-        setSelfMicNote('');
-      } else {
-        micStreamRef.current = null;
-        setSelfMicNote(
-          'マイクが使えないため、「自分」の自動判定はオフです。'
-        );
-      }
-    } else {
-      selfMic?.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-      setSelfMicNote('');
-    }
-
-    streamRef.current = stream;
-    mimeTypeRef.current = pickRecorderMimeType();
-    wantRecordingRef.current = true;
+  const bindLiveWatch = (stream: MediaStream) => {
     releaseLiveRef.current?.();
     const watched = [stream, micStreamRef.current].filter(
       (item): item is MediaStream => item != null
     );
     releaseLiveRef.current = watchLiveCapture(() => {
       stopRecordingRef.current();
+      stopTracks();
     }, watched);
+  };
+
+  const startRecording = async () => {
+    setError('');
+
+    const source = audioSource;
+    let stream = streamRef.current;
+    const reuse = hasLiveAudio(stream) && heldSourceRef.current === source;
+
+    if (!reuse || !stream) {
+      if (streamRef.current || micStreamRef.current) stopTracks();
+      const wantSelfMic = source === 'system';
+      const selfMicPromise = wantSelfMic ? openSelfMic() : Promise.resolve(null);
+      try {
+        stream = await acquireAudioStream(source);
+      } catch (e) {
+        const leftover = await selfMicPromise;
+        leftover?.getTracks().forEach((track) => track.stop());
+        const err = e as DOMException | Error;
+        console.error('音声ソース取得エラー:', err);
+        if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
+          setError(
+            source === 'system'
+              ? '画面共有がキャンセルされたか、許可されませんでした。'
+              : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
+          );
+          return;
+        }
+        if (err.name === 'NoSystemAudioError' || err.message === 'NO_SYSTEM_AUDIO') {
+          setError(SYSTEM_AUDIO_HELP);
+          return;
+        }
+        setError(
+          source === 'system'
+            ? `アプリ / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`
+            : 'マイクにアクセスできませんでした。ブラウザのマイク許可を確認してください。'
+        );
+        return;
+      }
+
+      const selfMic = await selfMicPromise;
+      if (wantSelfMic) {
+        micStreamRef.current = selfMic;
+        setSelfMicNote(
+          selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
+        );
+      } else {
+        selfMic?.getTracks().forEach((track) => track.stop());
+        micStreamRef.current = null;
+        setSelfMicNote('');
+      }
+      heldSourceRef.current = source;
+    } else if (source === 'system' && !hasLiveAudio(micStreamRef.current)) {
+      const selfMic = await openSelfMic();
+      micStreamRef.current = selfMic;
+      setSelfMicNote(
+        selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
+      );
+    }
+
+    streamRef.current = stream;
+    mimeTypeRef.current = pickRecorderMimeType();
+    wantRecordingRef.current = true;
+    bindLiveWatch(stream);
     rotateAfterStopRef.current = false;
 
     stream.getAudioTracks().forEach((track) => {
       track.onended = () => {
-        if (!wantRecordingRef.current) return;
+        if (releasingRef.current) return;
+        const wasRecording = wantRecordingRef.current;
+        const source = heldSourceRef.current ?? audioSourceRef.current;
         wantRecordingRef.current = false;
         rotateAfterStopRef.current = false;
         clearSegmentTimer();
-        const micRec = micRecorderRef.current;
-        if (micRec && micRec.state !== 'inactive') {
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state !== 'inactive') {
           try {
-            micRec.stop();
+            recorder.stop();
           } catch {
             /* ignore */
           }
         }
-        const recorder = mediaRecorderRef.current;
-        if (recorder && recorder.state !== 'inactive') {
-          recorder.stop();
-        } else {
-          stopTracks();
-          setIsRecording(false);
-        }
-        setError('画面共有が終了したため録音を停止しました。');
+        stopTracks();
+        setIsRecording(false);
+        if (!wasRecording) return;
+        setError(
+          source === 'system'
+            ? '画面共有が終了したため録音を停止しました。'
+            : 'マイクが止まったため録音を停止しました。'
+        );
       };
     });
 
@@ -921,14 +952,12 @@ export default function Home() {
 
     const recorder = mediaRecorderRef.current;
     if (!recorder || recorder.state === 'inactive') {
-      stopTracks();
       setIsRecording(false);
       return;
     }
     try {
       recorder.stop();
     } catch {
-      stopTracks();
       setIsRecording(false);
     }
   };
