@@ -18,7 +18,6 @@ import {
   rankFromAverage,
   savePrevAxisScores,
   type GdAxisScore,
-  type GdClearUtterance,
   type GdClearView,
   type GdSelfEval,
 } from '@/lib/gd-score';
@@ -35,7 +34,9 @@ type Props = {
   onLive: () => void;
 };
 
-const REVEAL_STEPS = 8;
+const REVEAL_STEPS = 7;
+
+const EMPTY_QUOTE = '（ベスト発言はまだありません）';
 
 function RadarChart({ axes }: { axes: GdAxisScore[] }) {
   const size = 220;
@@ -121,52 +122,6 @@ function RadarChart({ axes }: { axes: GdAxisScore[] }) {
   );
 }
 
-function ChartPreview({
-  utterances,
-  durationSec,
-  activeId,
-  onPick,
-}: {
-  utterances: GdClearUtterance[];
-  durationSec: number;
-  activeId: string | null;
-  onPick: (id: string) => void;
-}) {
-  const span = Math.max(60, durationSec);
-  return (
-    <div className={styles.chartPreview} aria-label="デュアルレーン縮小プレビュー">
-      <div className={styles.chartHeads}>
-        <span>他者</span>
-        <span className={styles.chartAxis}>時間</span>
-        <span className={styles.chartSelfHead}>自分</span>
-      </div>
-      <div className={styles.chartTrack}>
-        <div className={styles.chartMast} aria-hidden="true" />
-        {utterances.map((u) => {
-          const top = `${(u.atSec / span) * 100}%`;
-          const isSelf = u.speaker === '自分';
-          const cls = isSelf
-            ? activeId === u.id
-              ? `${styles.noteSelf} ${styles.noteActive}`
-              : styles.noteSelf
-            : styles.noteOther;
-          return (
-            <button
-              key={u.id}
-              type="button"
-              className={cls}
-              style={{ top }}
-              title={u.text}
-              aria-label={`${u.speaker} ${formatDurationJa(u.atSec)}: ${u.text}`}
-              onClick={() => onPick(u.id)}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export function GdResult({
   goal,
   transcript,
@@ -183,10 +138,7 @@ export function GdResult({
     preferMock ? null : null
   );
   const [reveal, setReveal] = useState(0);
-  const [openAxis, setOpenAxis] = useState<string | null>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [prevAxes, setPrevAxes] = useState<Partial<Record<string, number>>>({});
-  const listRef = useRef<HTMLUListElement>(null);
   const savedRef = useRef(false);
 
   useEffect(() => {
@@ -275,7 +227,7 @@ export function GdResult({
       bestQuote: pickBestQuote(
         evalResult ?? placeholderEval(''),
         utterances,
-        '（ベスト発言はまだありません）'
+        EMPTY_QUOTE
       ),
       axes,
       stats: {
@@ -284,10 +236,7 @@ export function GdResult({
         speakRatio:
           lineCount > 0 ? selfCount / lineCount : stats.speakRatio,
       },
-      utterances:
-        utterances.length > 0
-          ? utterances
-          : mockClearView().utterances.map((u) => ({ ...u, id: `fb-${u.id}` })),
+      utterances,
       warning: evalResult?.warning,
     };
   }, [preferMock, goal, transcript, evalResult, selfCount, lineCount]);
@@ -312,14 +261,6 @@ export function GdResult({
     const t = window.setTimeout(() => savePrevAxisScores(view.axes), 800);
     return () => window.clearTimeout(t);
   }, [loading, view.axes]);
-
-  function pickUtterance(id: string) {
-    setActiveId(id);
-    const el = listRef.current?.querySelector(`[data-uid="${id}"]`);
-    if (el instanceof HTMLElement) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }
 
   const shown = (step: number) => (reveal >= step ? styles.revealIn : styles.revealWait);
 
@@ -391,84 +332,58 @@ export function GdResult({
               </ul>
             </section>
 
-            <section className={`${styles.previewBlock} ${shown(5)}`} aria-label="チャートプレビュー">
-              <p className={styles.sectionLabel}>CHART</p>
-              <ChartPreview
-                utterances={view.utterances}
-                durationSec={view.stats.durationSec}
-                activeId={activeId}
-                onPick={pickUtterance}
-              />
-              <ul className={styles.utterList} ref={listRef} aria-label="発言リスト">
-                {view.utterances.map((u) => (
-                  <li
-                    key={u.id}
-                    data-uid={u.id}
-                    className={[
-                      styles.utterItem,
-                      u.speaker === '自分' ? styles.utterSelf : styles.utterOther,
-                      activeId === u.id ? styles.utterActive : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    <button type="button" onClick={() => pickUtterance(u.id)}>
-                      <span className={styles.utterClock}>{formatDurationJa(u.atSec)}</span>
-                      <span className={styles.utterWho}>{u.speaker}</span>
-                      <span className={styles.utterText}>{u.text}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className={`${styles.quoteBlock} ${shown(6)}`} aria-label="ベスト発言">
-              <p className={styles.sectionLabel}>BEST</p>
-              <blockquote className={styles.quote}>「{view.bestQuote}」</blockquote>
+            <section className={`${styles.axisSections} ${shown(5)}`} aria-label="各項目の講評">
+              <p className={styles.sectionLabel}>各項目の講評</p>
               {view.summary ? <p className={styles.summary}>{view.summary}</p> : null}
-            </section>
-
-            <section className={`${styles.axisSections} ${shown(7)}`} aria-label="軸別コメント">
-              <p className={styles.sectionLabel}>DETAIL</p>
               {view.axes.map((axis) => {
-                const open = openAxis === axis.axis;
                 const prev = prevAxes[axis.axis];
                 const isNew =
                   axis.score != null && prev != null && axis.score > prev;
                 return (
-                  <details
-                    key={axis.axis}
-                    className={styles.axisDetails}
-                    open={open}
-                    onToggle={(e) => {
-                      const el = e.currentTarget;
-                      setOpenAxis(el.open ? axis.axis : null);
-                    }}
-                  >
-                    <summary>
+                  <article key={axis.axis} className={styles.axisCard}>
+                    <header className={styles.axisHead}>
                       <span>{axis.axis}</span>
                       <span className={styles.axisScoreInline}>
                         {axis.score ?? '—'}/5
                         {isNew ? <em className={styles.newRecord}>NEW RECORD</em> : null}
                       </span>
-                    </summary>
+                    </header>
                     <p className={styles.axisComment}>{axis.comment || 'コメントはありません。'}</p>
-                    <p className={styles.axisStats}>
-                      発言比率 {(view.stats.speakRatio * 100).toFixed(0)}% · 応答{' '}
-                      {view.stats.responseCount}回
-                      {prev != null ? ` · 前回 ${prev}` : ''}
-                    </p>
-                  </details>
+                  </article>
                 );
               })}
+              <details className={styles.axisStatsFold}>
+                <summary>統計</summary>
+                <p className={styles.axisStats}>
+                  発言比率 {(view.stats.speakRatio * 100).toFixed(0)}% · 応答{' '}
+                  {view.stats.responseCount}回 · {formatDurationJa(view.stats.durationSec)} ·{' '}
+                  {view.stats.participantCount}人
+                </p>
+                {view.axes.some((axis) => prevAxes[axis.axis] != null) ? (
+                  <p className={styles.axisStats}>
+                    前回{' '}
+                    {view.axes
+                      .filter((axis) => prevAxes[axis.axis] != null)
+                      .map((axis) => `${axis.axis} ${prevAxes[axis.axis]}`)
+                      .join(' · ')}
+                  </p>
+                ) : null}
+              </details>
             </section>
 
+            {view.bestQuote.trim() && view.bestQuote.trim() !== EMPTY_QUOTE ? (
+              <section className={`${styles.quoteBlock} ${shown(6)}`} aria-label="ベスト発言">
+                <p className={styles.sectionLabel}>BEST</p>
+                <blockquote className={styles.quote}>「{view.bestQuote}」</blockquote>
+              </section>
+            ) : null}
+
             {view.warning ? (
-              <p className={`${styles.warn} ${shown(8)}`} role="status">
+              <p className={`${styles.warn} ${shown(7)}`} role="status">
                 {view.warning}
               </p>
             ) : (
-              <p className={`${styles.footerNote} ${shown(8)}`}>
+              <p className={`${styles.footerNote} ${shown(7)}`}>
                 {preferMock
                   ? 'モックUIです。本番では終了後の文字起こしからLLMが5軸と総評を埋めます。'
                   : 'コンボ表示はありません。黒×金のクリア画面です。'}
