@@ -18,10 +18,54 @@
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.55rem 0.75rem 0.45rem;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem 0.4rem;
   border-bottom: 1px solid rgba(246, 212, 138, 0.28);
   background: rgba(12, 8, 18, 0.72);
+}
+
+.stageStrip {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.stageChip,
+.stageOn {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+  border-radius: 999px;
+  min-height: 24px;
+  padding: 0.05rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.stageChip {
+  border: 1px solid rgba(246, 212, 138, 0.28);
+  background: rgba(255, 244, 214, 0.04);
+  color: rgba(248, 241, 227, 0.72);
+}
+
+.stageOn {
+  border: 1px solid #f6d48a;
+  background: #f6d48a;
+  color: #1a1208;
+  box-shadow: 0 0 10px rgba(246, 212, 138, 0.45);
+}
+
+.stageChip:focus-visible,
+.stageOn:focus-visible {
+  outline: 2px solid #5eead4;
+  outline-offset: 1px;
 }
 
 .hudRow,
