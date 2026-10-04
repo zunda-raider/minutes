@@ -6,26 +6,32 @@
 
 import { parseLooseJson } from '@/lib/gd-analyze';
 
-export const LOGIC_TREE_STORAGE_KEY = 'minutes.gd.logicTree.v1';
+/** Current tree. v1 is read once and copied here so older boards are not dropped. */
+export const LOGIC_TREE_STORAGE_KEY = 'minutes.gd.logicTree.v2';
+export const LOGIC_TREE_LEGACY_STORAGE_KEY = 'minutes.gd.logicTree.v1';
 
 /** Short mark the model may put on a node the user already created. */
 export const LOGIC_HINTS = ['薄い', '十分', '脱線', '停滞'] as const;
 export type LogicHint = (typeof LOGIC_HINTS)[number];
 
-export type LogicPoint = {
+/** A 論点. Children are more 論点, with no fixed depth. */
+export type LogicNode = {
   id: string;
   label: string;
   hint: string;
+  children: LogicNode[];
 };
 
 export type LogicGoal = {
   id: string;
   label: string;
   hint: string;
-  points: LogicPoint[];
+  points: LogicNode[];
 };
 
 export type LogicTreeDoc = {
+  /** Editable 目的. Separate from the live header until they are synced. */
+  purpose: string;
   goals: LogicGoal[];
   talkingId: string | null;
   comment: string;
@@ -41,14 +47,16 @@ export type OrganizeResponse = {
   warning?: string;
 };
 
-const MAX_GOALS = 16;
-const MAX_POINTS = 12;
+const MAX_GOALS = 40;
+/** Safety cap for a hand-built tree. The UI itself does not stop at a depth. */
+const MAX_NODES = 400;
+const MAX_DEPTH = 400;
 const MAX_LABEL = 80;
 const MAX_COMMENT = 1200;
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 
 export function emptyLogicTree(): LogicTreeDoc {
-  return { goals: [], talkingId: null, comment: '' };
+  return { purpose: '', goals: [], talkingId: null, comment: '' };
 }
 
 export function newLogicId(prefix: 'g' | 'p'): string {
@@ -92,13 +100,86 @@ function cleanId(value: unknown): string {
   return ID_RE.test(s) ? s : '';
 }
 
+function addNodeIds(nodes: LogicNode[], ids: Set<string>) {
+  for (const node of nodes) {
+    ids.add(node.id);
+    addNodeIds(node.children, ids);
+  }
+}
+
 export function idsOf(doc: LogicTreeDoc): Set<string> {
   const ids = new Set<string>();
   for (const goal of doc.goals) {
     ids.add(goal.id);
-    for (const point of goal.points) ids.add(point.id);
+    addNodeIds(goal.points, ids);
   }
   return ids;
+}
+
+export function collectNodeIds(node: LogicNode, into: Set<string> = new Set()): Set<string> {
+  into.add(node.id);
+  for (const child of node.children) collectNodeIds(child, into);
+  return into;
+}
+
+export function renameNode(nodes: LogicNode[], id: string, label: string): LogicNode[] {
+  return nodes.map((node) => {
+    if (node.id === id) return { ...node, label };
+    return { ...node, children: renameNode(node.children, id, label) };
+  });
+}
+
+export function addChildNode(nodes: LogicNode[], parentId: string, child: LogicNode): LogicNode[] {
+  return nodes.map((node) => {
+    if (node.id === parentId) return { ...node, children: [...node.children, child] };
+    return { ...node, children: addChildNode(node.children, parentId, child) };
+  });
+}
+
+export function removeNode(
+  nodes: LogicNode[],
+  id: string
+): { nodes: LogicNode[]; removed: Set<string> } {
+  const removed = new Set<string>();
+  function walk(list: LogicNode[]): LogicNode[] {
+    const next: LogicNode[] = [];
+    for (const node of list) {
+      if (node.id === id) {
+        collectNodeIds(node, removed);
+        continue;
+      }
+      next.push({ ...node, children: walk(node.children) });
+    }
+    return next;
+  }
+  return { nodes: walk(nodes), removed };
+}
+
+function readNodes(
+  raw: unknown,
+  seen: Set<string>,
+  depth: number,
+  budget: { left: number }
+): LogicNode[] {
+  if (!Array.isArray(raw) || depth > MAX_DEPTH || budget.left <= 0) return [];
+  const nodes: LogicNode[] = [];
+  for (const child of raw) {
+    if (budget.left <= 0) break;
+    const point = asRecord(child);
+    if (!point) continue;
+    const pid = cleanId(point.id);
+    if (!pid || seen.has(pid)) continue;
+    seen.add(pid);
+    budget.left -= 1;
+    const nested = point.children ?? point.points;
+    nodes.push({
+      id: pid,
+      label: clip(point.label, MAX_LABEL),
+      hint: lightHint(point.hint),
+      children: readNodes(nested, seen, depth + 1, budget),
+    });
+  }
+  return nodes;
 }
 
 export function sanitizeLogicTree(input: unknown): LogicTreeDoc {
@@ -106,38 +187,26 @@ export function sanitizeLogicTree(input: unknown): LogicTreeDoc {
   if (!rec) return emptyLogicTree();
   const goalsRaw = Array.isArray(rec.goals) ? rec.goals : [];
   const seen = new Set<string>();
+  const budget = { left: MAX_NODES };
   const goals: LogicGoal[] = [];
   for (const item of goalsRaw) {
-    if (goals.length >= MAX_GOALS) break;
+    if (goals.length >= MAX_GOALS || budget.left <= 0) break;
     const row = asRecord(item);
     if (!row) continue;
     const id = cleanId(row.id);
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    const points: LogicPoint[] = [];
-    const pointsRaw = Array.isArray(row.points) ? row.points : [];
-    for (const child of pointsRaw) {
-      if (points.length >= MAX_POINTS) break;
-      const point = asRecord(child);
-      if (!point) continue;
-      const pid = cleanId(point.id);
-      if (!pid || seen.has(pid)) continue;
-      seen.add(pid);
-      points.push({
-        id: pid,
-        label: clip(point.label, MAX_LABEL),
-        hint: lightHint(point.hint),
-      });
-    }
+    budget.left -= 1;
     goals.push({
       id,
       label: clip(row.label, MAX_LABEL),
       hint: lightHint(row.hint),
-      points,
+      points: readNodes(row.points ?? row.children, seen, 1, budget),
     });
   }
   const talking = cleanId(rec.talkingId);
   return {
+    purpose: clip(rec.purpose, MAX_LABEL),
     goals,
     talkingId: talking && seen.has(talking) ? talking : null,
     comment: clipBlock(rec.comment, MAX_COMMENT),
@@ -153,10 +222,23 @@ export function parseStoredLogicTree(raw: string | null): LogicTreeDoc {
   }
 }
 
+/** Prefer v2. If that key is empty, lift a v1 tree (flat 論点, no 目的). */
+export function readStoredLogicTree(getItem: (key: string) => string | null): LogicTreeDoc {
+  try {
+    const current = getItem(LOGIC_TREE_STORAGE_KEY);
+    if (current) return parseStoredLogicTree(current);
+    return parseStoredLogicTree(getItem(LOGIC_TREE_LEGACY_STORAGE_KEY));
+  } catch {
+    return emptyLogicTree();
+  }
+}
+
+function nodeHasLabel(node: LogicNode): boolean {
+  return Boolean(node.label.trim()) || node.children.some(nodeHasLabel);
+}
+
 export function logicTreeHasContent(doc: LogicTreeDoc): boolean {
-  return doc.goals.some(
-    (goal) => goal.label.trim() || goal.points.some((point) => point.label.trim())
-  );
+  return doc.goals.some((goal) => goal.label.trim() || goal.points.some(nodeHasLabel));
 }
 
 /** Recent excerpt only, so a small Ollama context can still see the tail. */
@@ -175,23 +257,30 @@ export function buildOrganizePrompt(input: {
 }): { system: string; user: string } {
   const tree = sanitizeLogicTree(input.tree);
   const lines: string[] = [];
+  lines.push(`目的「${tree.purpose.trim() || '（なし）'}」`);
   if (tree.goals.length === 0) {
     lines.push('（大論点なし）');
   }
+  const appendNodes = (nodes: LogicNode[], depth: number) => {
+    const pad = '  '.repeat(depth);
+    for (const point of nodes) {
+      const pmark = tree.talkingId === point.id ? ' いま話してる' : '';
+      const phint = point.hint ? ` [${point.hint}]` : '';
+      lines.push(`${pad}- ${point.id} 論点「${point.label || '（無名）'}」${phint}${pmark}`);
+      appendNodes(point.children, depth + 1);
+    }
+  };
   for (const goal of tree.goals) {
     const mark = tree.talkingId === goal.id ? ' いま話してる' : '';
     const hint = goal.hint ? ` [${goal.hint}]` : '';
     lines.push(`- ${goal.id} 大論点「${goal.label || '（無名）'}」${hint}${mark}`);
-    for (const point of goal.points) {
-      const pmark = tree.talkingId === point.id ? ' いま話してる' : '';
-      const phint = point.hint ? ` [${point.hint}]` : '';
-      lines.push(`  - ${point.id} 論点「${point.label || '（無名）'}」${phint}${pmark}`);
-    }
+    appendNodes(goal.points, 1);
   }
   const transcript = tailTranscript(input.transcript);
   const prior = clipBlock(tree.comment, 400);
   const system = `あなたはグループディスカッションの論点整理役です。日本語で、JSONだけを返してください。
-ユーザーが手で作った木は、追加・削除・改名してはいけません。コメントと、既存idへの短い印だけです。
+ユーザーが手で作った木は、追加・削除・改名してはいけません。目的の文も変えません。コメントと、既存idへの短い印だけです。
+論点は何段でも入れ子になります。渡されたid以外は使わないでください。
 
 返すJSONの形:
 {"comment":"200字程度の整理","talking":"既存idか空文字","statuses":[{"id":"既存id","note":"薄い"}],"missing":["木に無い短い観点"],"designNote":"組み方への一言。木は書き換えない"}
@@ -329,14 +418,18 @@ export function applyOrganize(doc: LogicTreeDoc, res: OrganizeResponse): LogicTr
   }
   const talking =
     res.talking && ids.has(res.talking) ? res.talking : doc.talkingId;
+  const paint = (nodes: LogicNode[]): LogicNode[] =>
+    nodes.map((point) => ({
+      ...point,
+      hint: hints.get(point.id) ?? point.hint,
+      children: paint(point.children),
+    }));
   return {
+    purpose: doc.purpose,
     goals: doc.goals.map((goal) => ({
       ...goal,
       hint: hints.get(goal.id) ?? goal.hint,
-      points: goal.points.map((point) => ({
-        ...point,
-        hint: hints.get(point.id) ?? point.hint,
-      })),
+      points: paint(goal.points),
     })),
     talkingId: talking,
     comment: res.comment.trim() ? res.comment : doc.comment,

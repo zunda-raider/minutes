@@ -383,6 +383,18 @@
   background: rgba(246, 212, 138, 0.1);
 }
 
+.treeBranch {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.treeItem {
+  min-width: 0;
+}
+
 .treeRole {
   margin: 0;
   color: #f6d48a;
@@ -789,6 +801,7 @@
 .treeEditRow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.28rem;
   min-width: 0;
 }

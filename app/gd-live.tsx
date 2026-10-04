@@ -812,7 +812,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
       </header>
 
       <div className={styles.board}>
-        <GdLogicTree theme={goal} transcript={transcript} />
+        <GdLogicTree theme={goal} onThemeChange={setGoal} transcript={transcript} />
         <div className={styles.scroller} ref={scrollerRef}>
           <div className={styles.laneHeads}>
             <p>他者</p>
