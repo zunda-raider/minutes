@@ -64,7 +64,10 @@ import {
   acquireSystemAudio,
   openSelfMic,
   pickRecorderMimeType,
+  stopMediaTracks,
 } from '@/lib/zoom-capture';
+import { watchLiveCapture } from '@/lib/live-capture';
+import { StopShareButton } from './stop-share';
 
 type LangOption = { code: string; label: string };
 
@@ -266,6 +269,8 @@ export default function Home() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const releaseLiveRef = useRef<(() => void) | null>(null);
+  const stopRecordingRef = useRef<() => void>(() => {});
   /** Parallel mic used only in Zoom/system mode, for 自分 energy — not STT. */
   const micStreamRef = useRef<MediaStream | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
@@ -337,8 +342,9 @@ export default function Home() {
   useEffect(() => {
     return () => {
       if (segmentTimerRef.current) clearInterval(segmentTimerRef.current);
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      releaseLiveRef.current?.();
+      releaseLiveRef.current = null;
+      stopMediaTracks(streamRef.current, micStreamRef.current);
     };
   }, []);
 
@@ -431,9 +437,10 @@ export default function Home() {
     audioSource === 'system' ? ZOOM_SEGMENT_MS : SEGMENT_MS_MIC;
 
   const stopTracks = () => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    releaseLiveRef.current?.();
+    releaseLiveRef.current = null;
+    stopMediaTracks(streamRef.current, micStreamRef.current);
     streamRef.current = null;
-    micStreamRef.current?.getTracks().forEach((track) => track.stop());
     micStreamRef.current = null;
     const micRec = micRecorderRef.current;
     micRecorderRef.current = null;
@@ -818,7 +825,7 @@ export default function Home() {
       stream = await acquireAudioStream(audioSource);
     } catch (e) {
       const leftover = await selfMicPromise;
-      leftover?.getTracks().forEach((track) => track.stop());
+      stopMediaTracks(leftover);
       const err = e as DOMException | Error;
       console.error('音声ソース取得エラー:', err);
       if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
@@ -861,6 +868,13 @@ export default function Home() {
     streamRef.current = stream;
     mimeTypeRef.current = pickRecorderMimeType();
     wantRecordingRef.current = true;
+    releaseLiveRef.current?.();
+    const watched = [stream, micStreamRef.current].filter(
+      (item): item is MediaStream => item != null
+    );
+    releaseLiveRef.current = watchLiveCapture(() => {
+      stopRecordingRef.current();
+    }, watched);
     rotateAfterStopRef.current = false;
 
     stream.getAudioTracks().forEach((track) => {
@@ -914,6 +928,7 @@ export default function Home() {
     }
     recorder.stop();
   };
+  stopRecordingRef.current = stopRecording;
 
   const flashCopyHint = (message: string) => {
     setCopyHint(message);
@@ -1810,6 +1825,7 @@ export default function Home() {
           <p className={styles.subtitle}>{subtitle}</p>
         </div>
         <div className={styles.topMeta}>
+          <StopShareButton />
           <span className={styles.metaChip}>{entries.length} segments</span>
           <span className={styles.metaChip}>Copy all = 古い順</span>
         </div>
@@ -1915,14 +1931,7 @@ export default function Home() {
         <div className={styles.topMeta}>
           <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
           <span className={styles.metaChip}>{entries.length}件</span>
-          <button
-            type="button"
-            className={styles.gdEntry}
-            onClick={() => setScreen('gd')}
-          >
-            <span className={styles.gdEntryBadge}>出航</span>
-            GDモード
-          </button>
+          <StopShareButton />
         </div>
       </header>
 

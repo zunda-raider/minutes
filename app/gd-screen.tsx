@@ -4,6 +4,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import gd from './gd.module.css';
 import { GdLive } from './gd-live';
+import { StopShareButton } from './stop-share';
 import {
   coerceGdAnalysis,
   formatGdNote,
@@ -734,6 +735,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             <h1 className={gd.lobbyTitle}>分析結果</h1>
             <p className={gd.lobbyLead}>航海図と論点の木。ライブ盤と同じ海の色で、静かに読みます。</p>
           </div>
+          <StopShareButton />
         </header>
         <div className={gd.stack}>
           <div className={gd.resultBar}>
@@ -869,6 +871,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             港で航海ログを選び、積み荷カードを積んでから出航します。分析と航海図・木は、出航のあとです。
           </p>
         </div>
+        <StopShareButton />
         <button type="button" className={gd.liveJump} onClick={() => setDeck('live')}>
           ライブ
         </button>

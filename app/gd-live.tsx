@@ -17,9 +17,12 @@ import {
   acquireSystemAudio,
   openSelfMic,
   startZoomSegmentRecorder,
+  stopMediaTracks,
   type ZoomChunk,
   type ZoomRecorder,
 } from '@/lib/zoom-capture';
+import { haltLiveCapture, watchLiveCapture } from '@/lib/live-capture';
+import { StopShareButton } from './stop-share';
 
 type Speed = 1 | 2 | 4;
 type Phase = 'idle' | 'live' | 'ended';
@@ -141,17 +144,26 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const topicSeq = useRef(1);
   const captureRef = useRef<ZoomRecorder | null>(null);
+  const releaseRef = useRef<(() => void) | null>(null);
+  const streamsRef = useRef<MediaStream[]>([]);
   const aliveRef = useRef(true);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const feedRef = useRef<Feed>('live');
+  const phaseRef = useRef(phase);
   feedRef.current = feed;
+  phaseRef.current = phase;
 
   useEffect(() => {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
+      const streams = streamsRef.current;
+      releaseRef.current?.();
+      releaseRef.current = null;
       captureRef.current?.stop();
       captureRef.current = null;
+      stopMediaTracks(...streams);
+      streamsRef.current = [];
     };
   }, []);
 
@@ -225,6 +237,9 @@ export function GdLive({ onBack, onHarbor }: Props) {
 
   function onCaptureEnded(reason: 'stopped' | 'share-ended' | 'error') {
     captureRef.current = null;
+    releaseRef.current?.();
+    releaseRef.current = null;
+    streamsRef.current = [];
     if (!aliveRef.current) return;
     if (reason === 'share-ended') {
       setNotice('画面共有が終了したため録音を停止しました。');
@@ -253,7 +268,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
       stream = await acquireSystemAudio();
     } catch (err) {
       const leftover = await selfMicPromise;
-      leftover?.getTracks().forEach((track) => track.stop());
+      stopMediaTracks(leftover);
       console.error('GD live capture failed:', err);
       if (aliveRef.current) setNotice(captureErrorMessage(err));
       setArming(false);
@@ -262,15 +277,37 @@ export function GdLive({ onBack, onHarbor }: Props) {
 
     const mic = await selfMicPromise;
     if (!aliveRef.current) {
-      stream.getTracks().forEach((track) => track.stop());
-      mic?.getTracks().forEach((track) => track.stop());
+      stopMediaTracks(stream, mic);
       setArming(false);
       return;
     }
     if (!mic) setMicWarn(MIC_WARN);
 
+    const watched = [stream, mic].filter((item): item is MediaStream => item != null);
+    streamsRef.current = watched;
+    let handle: ZoomRecorder | null = null;
+    releaseRef.current?.();
+    releaseRef.current = watchLiveCapture(() => {
+      const current = handle ?? captureRef.current;
+      handle = null;
+      captureRef.current = null;
+      if (current) current.stop();
+      else stopMediaTracks(stream, mic);
+      if (!aliveRef.current) return;
+      if (phaseRef.current === 'live') {
+        const ms = Math.min(
+          GD_LIVE_DURATION_MS,
+          baseRef.current + (performance.now() - originRef.current) * speedRef.current
+        );
+        baseRef.current = ms;
+        elapsedRef.current = ms;
+        setElapsedMs(ms);
+      }
+      setPhase((currentPhase) => (currentPhase === 'live' ? 'ended' : currentPhase));
+    }, watched);
+
     let failedSync = false;
-    const handle = startZoomSegmentRecorder({
+    handle = startZoomSegmentRecorder({
       system: stream,
       mic,
       onChunk: enqueueChunk,
@@ -290,6 +327,10 @@ export function GdLive({ onBack, onHarbor }: Props) {
   }
 
   function stop() {
+    if (releaseRef.current) {
+      haltLiveCapture();
+      return;
+    }
     if (phase !== 'live') return;
     const ms = Math.min(
       GD_LIVE_DURATION_MS,
@@ -423,6 +464,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
             <p className={styles.kicker}>GDモード</p>
             <h1 className={styles.title}>ライブ</h1>
           </div>
+          <StopShareButton />
           <p className={styles.phase} data-phase={phase}>
             {phaseLabel}
           </p>

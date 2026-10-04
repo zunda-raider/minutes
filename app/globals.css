@@ -42,3 +42,32 @@ select:focus-visible {
   outline: 2px solid #5b8cff;
   outline-offset: 2px;
 }
+
+/* Top bar is always 停止. Idle stays disabled; it never becomes GDモード. */
+.haltShare {
+  appearance: none;
+  border: 0;
+  background: #e11d48;
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.35);
+}
+
+.haltShare:disabled {
+  background: #3f1d2a;
+  color: rgba(255, 255, 255, 0.55);
+  box-shadow: none;
+  cursor: default;
+}
+
+.haltShare:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
