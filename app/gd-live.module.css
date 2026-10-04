@@ -356,8 +356,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
-  overflow: auto;
+  gap: 0.45rem;
+  overflow: hidden;
   padding: 0.7rem 0.65rem 0.8rem;
   border-radius: 14px;
   border: 1px solid rgba(246, 212, 138, 0.42);
@@ -746,3 +746,166 @@
   }
 
 }
+
+.treeHead,
+.treeFoot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.treeHead {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.treeScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding-right: 0.1rem;
+}
+
+.treeRootCurrent {
+  color: #1a1208;
+  background: #f6d48a;
+  border-color: #f6d48a;
+  box-shadow: 0 0 0 3px rgba(246, 212, 138, 0.22);
+}
+
+.treeRootCurrent .treeRole,
+.treeNodeCurrent .treeRole,
+.treeRootCurrent .treeHint,
+.treeNodeCurrent .treeHint {
+  color: #7c2d12;
+}
+
+.treeEditRow {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.treeEditRow .treeRole {
+  flex: none;
+}
+
+.treeHint {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #f6d48a;
+}
+
+.treeName {
+  width: 100%;
+  min-width: 0;
+  margin-top: 0.15rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.treeName::placeholder {
+  color: rgba(248, 241, 227, 0.38);
+}
+
+.treeRootCurrent .treeName::placeholder,
+.treeNodeCurrent .treeName::placeholder {
+  color: rgba(26, 18, 8, 0.45);
+}
+
+.treeName:focus {
+  outline: none;
+}
+
+.treeMini,
+.treeMiniOn,
+.treeOrganize {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 212, 138, 0.4);
+  background: rgba(255, 244, 214, 0.06);
+  color: #f8f1e3;
+  min-height: 24px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.treeMiniOn,
+.treeOrganize {
+  color: #1a1208;
+  background: #f6d48a;
+  border-color: #f6d48a;
+}
+
+.treeRootCurrent .treeMini,
+.treeNodeCurrent .treeMini {
+  color: #1a1208;
+  border-color: rgba(26, 18, 8, 0.28);
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.treeOrganize:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.treeFoot {
+  border-top: 1px solid rgba(246, 212, 138, 0.28);
+  padding-top: 0.4rem;
+}
+
+.treeComment {
+  width: 100%;
+  min-height: 5.4rem;
+  max-height: 9rem;
+  resize: vertical;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 241, 227, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f8f1e3;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.45;
+  padding: 0.4rem 0.5rem;
+}
+
+.treeComment:focus {
+  outline: 2px solid rgba(246, 212, 138, 0.55);
+  outline-offset: 1px;
+}
+
+.treeStatus,
+.treeStatusAlert {
+  margin: 0;
+  min-height: 1em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.4;
+  color: rgba(248, 241, 227, 0.62);
+}
+
+.treeStatusAlert {
+  color: #fda4af;
+}
+
