@@ -25,6 +25,7 @@ import {
 import { captureGeneration, registerHaltHook, trackAbort, trackClock } from '@/lib/capture-resources';
 import { watchLiveCapture } from '@/lib/live-capture';
 import { StopShareButton } from './stop-share';
+import { GdLogicTree } from './gd-logic-tree';
 
 /** Real Zoom capture only. Home / minutes stays at about 60s. */
 const GD_LIVE_SEGMENT_MS = 20_000;
@@ -606,6 +607,20 @@ export function GdLive({ onBack, onHarbor }: Props) {
           top: ((elapsedMs - minute * 60_000) / 1000) * GD_PX_PER_SEC,
         }));
 
+  const transcript = (
+    phase === 'idle'
+      ? []
+      : script.filter((line) => line.atSec * 1000 <= elapsedMs + (feed === 'demo' ? 500 : 2000))
+  )
+    .slice(-40)
+    .map((line) => {
+      const sec = Math.max(0, Math.floor(line.atSec));
+      const clock = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      const text = line.text.replace(/\s+/g, ' ').trim();
+      return `[${clock}] ${line.speaker}: ${text}`;
+    })
+    .join('\n')
+    .slice(-4000);
   const phaseLabel = phase === 'live' ? '議論中' : phase === 'ended' ? '終了' : '待機';
   const statusText =
     notice ||
@@ -797,36 +812,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
       </header>
 
       <div className={styles.board}>
-        <aside className={styles.tree} aria-label="論理の木">
-          <p className={styles.treeKicker}>論理の木</p>
-          <div className={styles.treeRoot}>
-            <p className={styles.treeRole}>目的</p>
-            <p className={goal.trim() ? styles.treeGoal : styles.treeMuted}>
-              {goal.trim() || 'お題はまだありません'}
-            </p>
-          </div>
-          <ul className={styles.treeList}>
-            {topics.length === 0 ? (
-              <li className={styles.treeEmpty}>論点はまだありません</li>
-            ) : (
-              topics.map((topic, index) => {
-                const current = index === topics.length - 1;
-                return (
-                  <li key={topic.id}>
-                    <p
-                      className={
-                        current ? `${styles.treeNode} ${styles.treeNodeCurrent}` : styles.treeNode
-                      }
-                      aria-current={current ? 'true' : undefined}
-                    >
-                      {topic.name}
-                    </p>
-                  </li>
-                );
-              })
-            )}
-          </ul>
-        </aside>
+        <GdLogicTree theme={goal} transcript={transcript} />
         <div className={styles.scroller} ref={scrollerRef}>
           <div className={styles.laneHeads}>
             <p>他者</p>
