@@ -52,6 +52,36 @@ type Props = {
 const SPEEDS: Speed[] = [1, 2, 4];
 const MIC_WARN = 'マイクが使えないため、発言はすべて他者側に載ります。';
 const MODEL_KEY_STORAGE = 'minutes.gd.whisperModelKey.v1';
+const STAGE_STORAGE = 'minutes.gd.stage.v1';
+
+/** Manual GD phases. Order and labels are the product contract. */
+const GD_STAGES = [
+  '前提確認',
+  '現状認識',
+  '顧客課題',
+  'リサーチ',
+  '課題発散',
+  '収束',
+  '競合・市場分析',
+  'ソリューションの深掘り',
+  '資料作成',
+] as const;
+
+type GdStage = (typeof GD_STAGES)[number];
+
+function isGdStage(value: string | null): value is GdStage {
+  return value != null && (GD_STAGES as readonly string[]).includes(value);
+}
+
+function storedStage(): GdStage {
+  try {
+    const raw = window.localStorage.getItem(STAGE_STORAGE);
+    if (isGdStage(raw)) return raw;
+  } catch {
+    /* private mode */
+  }
+  return GD_STAGES[0];
+}
 
 type WhisperModelKey = 1 | 2;
 
@@ -155,6 +185,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const [notice, setNotice] = useState('');
   const [micWarn, setMicWarn] = useState('');
   const [modelKey, setModelKey] = useState<WhisperModelKey>(2);
+  const [gdStage, setGdStage] = useState<GdStage>(GD_STAGES[0]);
   const [modelLabels, setModelLabels] = useState<{ 1: string; 2: string; fallback: boolean }>({
     1: '',
     2: '',
@@ -180,6 +211,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const feedRef = useRef<Feed>('live');
   const phaseRef = useRef(phase);
   const modelKeyRef = useRef<WhisperModelKey>(2);
+  const stageStripRef = useRef<HTMLDivElement>(null);
   feedRef.current = feed;
   phaseRef.current = phase;
   modelKeyRef.current = modelKey;
@@ -188,7 +220,23 @@ export function GdLive({ onBack, onHarbor }: Props) {
     const saved = storedModelKey();
     setModelKey(saved);
     modelKeyRef.current = saved;
+    setGdStage(storedStage());
   }, []);
+
+  useEffect(() => {
+    const root = stageStripRef.current;
+    if (!root) return;
+    const lit = root.querySelector<HTMLElement>('[data-lit="true"]');
+    if (!lit) return;
+    const pad = 8;
+    const left = lit.offsetLeft;
+    const right = left + lit.offsetWidth;
+    if (left < root.scrollLeft + pad) {
+      root.scrollLeft = Math.max(0, left - pad);
+    } else if (right > root.scrollLeft + root.clientWidth - pad) {
+      root.scrollLeft = right - root.clientWidth + pad;
+    }
+  }, [gdStage]);
 
   useEffect(() => {
     let cancelled = false;
@@ -638,6 +686,15 @@ export function GdLive({ onBack, onHarbor }: Props) {
       ? '開始すると、ダミーの発言が実時間で上に出ます。左が他者、右が自分。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。'
       : '開始すると、画面共有でZoomなどの音声を取ります。Whisperの区間が、左は他者・右は自分で載ります。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。';
 
+  function chooseStage(next: GdStage) {
+    setGdStage(next);
+    try {
+      window.localStorage.setItem(STAGE_STORAGE, next);
+    } catch {
+      /* private mode */
+    }
+  }
+
   function chooseModel(next: WhisperModelKey) {
     modelKeyRef.current = next;
     setModelKey(next);
@@ -660,6 +717,23 @@ export function GdLive({ onBack, onHarbor }: Props) {
   return (
     <div className={styles.stage}>
       <header className={styles.hud}>
+        <div className={styles.stageStrip} ref={stageStripRef} role="group" aria-label="議論の段階">
+          {GD_STAGES.map((name) => {
+            const lit = name === gdStage;
+            return (
+              <button
+                key={name}
+                type="button"
+                data-lit={lit ? 'true' : undefined}
+                className={lit ? styles.stageOn : styles.stageChip}
+                aria-pressed={lit}
+                onClick={() => chooseStage(name)}
+              >
+                {name}
+              </button>
+            );
+          })}
+        </div>
         <div className={styles.hudRow}>
           <button type="button" className={styles.home} onClick={onBack}>
             <span className={styles.chevron} aria-hidden="true" />
