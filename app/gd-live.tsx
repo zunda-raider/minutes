@@ -675,7 +675,8 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     .slice(-4000);
   const phaseLabel = phase === 'live' ? '議論中' : phase === 'ended' ? '終了' : '待機';
   const statusText = notice || micWarn;
-  const canOpenResult = phase === 'ended' || resultReady;
+  // Ended session, retained score, or mock preview from idle/live.
+  const canOpenResult = phase === 'ended' || resultReady || phase === 'idle' || phase === 'live';
 
   const idleHint =
     '開始すると、画面共有でZoomなどの音声を取ります。Whisperの区間が、左は他者・右は自分で載ります。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。';
