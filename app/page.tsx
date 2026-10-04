@@ -65,6 +65,7 @@ import {
   acquireSystemAudio,
   hasLiveAudio,
   openSelfMic,
+  reviveHeldCapture,
   pickRecorderMimeType,
   stopMediaTracks,
 } from '@/lib/zoom-capture';
@@ -765,6 +766,8 @@ export default function Home() {
   const startRecorderOnStream = useCallback(() => {
     const stream = streamRef.current;
     if (!stream) return;
+    reviveHeldCapture(stream);
+    reviveHeldCapture(micStreamRef.current);
     const epoch = queueEpochRef.current;
 
     const mimeType = mimeTypeRef.current;
@@ -920,6 +923,9 @@ export default function Home() {
     const source = audioSource;
     const generation = captureGeneration();
     let stream = streamRef.current;
+    // A previous halt may have left the held share live but disabled.
+    reviveHeldCapture(stream);
+    reviveHeldCapture(micStreamRef.current);
     const reuse = hasLiveAudio(stream) && heldSourceRef.current === source;
 
     if (!reuse || !stream) {
