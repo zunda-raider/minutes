@@ -51,6 +51,13 @@ export async function openSelfMic(): Promise<MediaStream | null> {
 /** Audio-only stream -> original display capture, so 停止 can end video too. */
 const displayRoots = new WeakMap<MediaStream, MediaStream>();
 
+/** True when the stream still has a live audio track (safe to record again). */
+export function hasLiveAudio(
+  stream: MediaStream | null | undefined
+): stream is MediaStream {
+  return !!stream?.getAudioTracks().some((track) => track.readyState === 'live');
+}
+
 /** Stop every track on these streams, including the display capture they came from. */
 export function stopMediaTracks(...streams: Array<MediaStream | null | undefined>) {
   const pending: MediaStream[] = [];
@@ -140,7 +147,9 @@ export function startZoomSegmentRecorder(opts: {
     want = false;
     if (timer) clearInterval(timer);
     timer = null;
-    stopTracks();
+    // Soft stop keeps display + system audio and the self mic.
+    // Share-ended and errors drop the tracks. Top-bar 停止 stops them itself.
+    if (reason !== 'stopped') stopTracks();
     opts.onEnded?.(reason);
   };
 

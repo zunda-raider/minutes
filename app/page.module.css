@@ -1627,6 +1627,24 @@
   overflow-x: auto;
 }
 
+.assignMerge {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0 0.45rem;
+  min-height: 32px;
+  border-radius: 999px;
+}
+
+.assignMerge:disabled {
+  color: #64748b;
+  cursor: default;
+}
+
 .assignDelete {
   appearance: none;
   flex: 0 0 auto;
