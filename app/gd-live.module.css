@@ -26,11 +26,11 @@
 
 .stageStrip {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.28rem;
+  gap: 0.5rem 0.55rem;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  padding: 0.2rem 0 0.15rem;
 }
 
 .stageChip,
@@ -40,12 +40,12 @@
   cursor: pointer;
   flex: none;
   border-radius: 999px;
-  min-height: 24px;
-  padding: 0.05rem 0.48rem;
-  font-size: 0.68rem;
+  min-height: 40px;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.95rem;
   font-weight: 800;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
   white-space: nowrap;
 }
 
@@ -69,7 +69,6 @@
 }
 
 .hudRow,
-.flowRow,
 .metaRow {
   display: flex;
   align-items: center;
@@ -82,8 +81,7 @@
 .go,
 .stop,
 .speed,
-.speedOn,
-.topicForm button {
+.speedOn {
   appearance: none;
   font: inherit;
   cursor: pointer;
@@ -214,8 +212,7 @@
 .go:disabled,
 .stop:disabled,
 .speed:disabled,
-.speedOn:disabled,
-.topicForm button:disabled {
+.speedOn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   box-shadow: none;
@@ -232,8 +229,7 @@
   color: #f6d48a;
 }
 
-.goal input,
-.topicForm input {
+.goal input {
   width: 100%;
   min-width: 0;
   border: 1px solid rgba(246, 212, 138, 0.45);
@@ -249,86 +245,6 @@
 
 .goal input:read-only {
   color: #fff8ea;
-}
-
-.flowRow {
-  align-items: stretch;
-}
-
-.flowLabel {
-  margin: 0;
-  flex: none;
-  align-self: center;
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: #f6d48a;
-}
-
-.flow {
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  min-width: 0;
-  flex: 1;
-  overflow-x: auto;
-  margin: 0;
-  padding: 0.1rem 0;
-}
-
-.flowEmpty {
-  color: rgba(248, 241, 227, 0.55);
-  font-size: 0.82rem;
-}
-
-.flowItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  flex: none;
-}
-
-.flowArrow {
-  color: #f6d48a;
-  font-weight: 800;
-}
-
-.flowChip {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0.1rem 0.6rem;
-  border-radius: 999px;
-  border: 1px solid rgba(248, 241, 227, 0.18);
-  background: rgba(255, 255, 255, 0.04);
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
-.flowItemCurrent .flowChip {
-  color: #1a1208;
-  background: #f6d48a;
-  border-color: #f6d48a;
-  box-shadow: 0 0 0 3px rgba(246, 212, 138, 0.25);
-}
-
-.topicForm {
-  display: flex;
-  gap: 0.35rem;
-  flex: none;
-  width: min(22rem, 46vw);
-}
-
-.topicForm button {
-  flex: none;
-  border: 0;
-  min-height: 34px;
-  padding: 0.2rem 0.75rem;
-  font-weight: 800;
-  color: #1a1208;
-  background: #f6d48a;
-  box-shadow: 0 3px 0 #a16207;
 }
 
 .metaRow {
@@ -624,34 +540,6 @@
   z-index: -1;
 }
 
-.divider {
-  position: absolute;
-  left: 0.6rem;
-  right: 0.6rem;
-  height: 0;
-  border-top: 2px dashed rgba(246, 212, 138, 0.9);
-  z-index: 5;
-  pointer-events: none;
-}
-
-.divider span {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  transform: translate(-50%, -50%);
-  max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0.08rem 0.55rem;
-  border-radius: 999px;
-  background: #1a1208;
-  color: #f6d48a;
-  border: 1px solid #f6d48a;
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
 .laneOther,
 .laneSelf {
   position: absolute;
@@ -791,10 +679,6 @@
 
   .harbor {
     margin-left: 0;
-  }
-
-  .topicForm {
-    width: min(18rem, 70vw);
   }
 
   .remainTime {

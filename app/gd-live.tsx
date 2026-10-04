@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
 import styles from './gd-live.module.css';
 import {
   GD_DEMO_LINES,
@@ -36,13 +35,6 @@ type Phase = 'idle' | 'live' | 'ended';
 type Feed = 'live' | 'demo';
 
 type BoardLine = DemoLine & { id: string };
-
-type TopicMark = {
-  id: string;
-  name: string;
-  /** Null until the clock is running. Stamped at the switch. */
-  atMs: number | null;
-};
 
 type Props = {
   onBack: () => void;
@@ -177,8 +169,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const [speed, setSpeed] = useState<Speed>(1);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [goal, setGoal] = useState('');
-  const [topicDraft, setTopicDraft] = useState('');
-  const [topics, setTopics] = useState<TopicMark[]>([]);
   const [utterances, setUtterances] = useState<BoardLine[]>([]);
   const [pending, setPending] = useState(0);
   const [arming, setArming] = useState(false);
@@ -197,7 +187,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const speedRef = useRef<Speed>(1);
   const elapsedRef = useRef(0);
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const topicSeq = useRef(1);
   const captureRef = useRef<ZoomRecorder | null>(null);
   const releaseRef = useRef<(() => void) | null>(null);
   const systemRef = useRef<MediaStream | null>(null);
@@ -338,13 +327,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
     originRef.current = performance.now();
     elapsedRef.current = 0;
     setElapsedMs(0);
-    setTopics((prev) => {
-      if (prev.length === 0) return prev;
-      return prev.map((topic, index) => ({
-        ...topic,
-        atMs: index === prev.length - 1 ? 0 : null,
-      }));
-    });
     scrollerRef.current?.scrollTo(0, 0);
     setPhase('live');
   }
@@ -594,17 +576,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
     }
   }
 
-  function addTopic(event: FormEvent) {
-    event.preventDefault();
-    const name = topicDraft.trim();
-    if (!name) return;
-    const atMs = phase === 'idle' ? null : elapsedRef.current;
-    const id = `topic-${topicSeq.current}`;
-    topicSeq.current += 1;
-    setTopics((prev) => [...prev, { id, name, atMs }]);
-    setTopicDraft('');
-  }
-
   const remainMs = Math.max(0, GD_LIVE_DURATION_MS - elapsedMs);
   const running = phase === 'live';
   const trackPx =
@@ -677,9 +648,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
     notice ||
     (pending > 0 ? `文字起こし中 ${pending}件` : '') ||
     micWarn ||
-    (feed === 'demo'
-      ? 'デモの発言です。速度だけ変えられます。'
-      : '本番はZoomのシステム音声です。マイクは自分の判定に使います。');
+    (feed === 'demo' ? 'デモの発言です。速度だけ変えられます。' : '');
 
   const idleHint =
     feed === 'demo'
@@ -717,23 +686,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
   return (
     <div className={styles.stage}>
       <header className={styles.hud}>
-        <div className={styles.stageStrip} ref={stageStripRef} role="group" aria-label="議論の段階">
-          {GD_STAGES.map((name) => {
-            const lit = name === gdStage;
-            return (
-              <button
-                key={name}
-                type="button"
-                data-lit={lit ? 'true' : undefined}
-                className={lit ? styles.stageOn : styles.stageChip}
-                aria-pressed={lit}
-                onClick={() => chooseStage(name)}
-              >
-                {name}
-              </button>
-            );
-          })}
-        </div>
         <div className={styles.hudRow}>
           <button type="button" className={styles.home} onClick={onBack}>
             <span className={styles.chevron} aria-hidden="true" />
@@ -784,38 +736,22 @@ export function GdLive({ onBack, onHarbor }: Props) {
           />
         </label>
 
-        <div className={styles.flowRow}>
-          <p className={styles.flowLabel}>論の流れ</p>
-          <ol className={styles.flow} aria-label="論の流れ">
-            {topics.length === 0 ? <li className={styles.flowEmpty}>まだありません</li> : null}
-            {topics.map((topic, index) => {
-              const current = index === topics.length - 1;
-              return (
-                <li
-                  key={topic.id}
-                  className={current ? `${styles.flowItem} ${styles.flowItemCurrent}` : styles.flowItem}
-                  aria-current={current ? 'true' : undefined}
-                >
-                  {index > 0 ? (
-                    <span className={styles.flowArrow} aria-hidden="true">
-                      →
-                    </span>
-                  ) : null}
-                  <span className={styles.flowChip}>{topic.name}</span>
-                </li>
-              );
-            })}
-          </ol>
-          <form className={styles.topicForm} onSubmit={addTopic}>
-            <input
-              value={topicDraft}
-              onChange={(event) => setTopicDraft(event.target.value)}
-              placeholder="論点の名前"
-              maxLength={18}
-              aria-label="新しい論点の名前"
-            />
-            <button type="submit">論点切替</button>
-          </form>
+        <div className={styles.stageStrip} ref={stageStripRef} role="group" aria-label="議論の段階">
+          {GD_STAGES.map((name) => {
+            const lit = name === gdStage;
+            return (
+              <button
+                key={name}
+                type="button"
+                data-lit={lit ? 'true' : undefined}
+                className={lit ? styles.stageOn : styles.stageChip}
+                aria-pressed={lit}
+                onClick={() => chooseStage(name)}
+              >
+                {name}
+              </button>
+            );
+          })}
         </div>
 
         <div className={styles.metaRow}>
@@ -882,9 +818,11 @@ export function GdLive({ onBack, onHarbor }: Props) {
               ))}
             </div>
           ) : null}
-          <p className={notice ? styles.captureError : styles.dummyNote} role={notice ? 'alert' : undefined}>
-            {statusText}
-          </p>
+          {statusText ? (
+            <p className={notice ? styles.captureError : styles.dummyNote} role={notice ? 'alert' : undefined}>
+              {statusText}
+            </p>
+          ) : null}
         </div>
       </header>
 
@@ -904,15 +842,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
                 <span>{tick.minute}:00</span>
               </div>
             ))}
-            {topics.map((topic) => {
-              if (topic.atMs == null || topic.atMs > elapsedMs) return null;
-              const top = ((elapsedMs - topic.atMs) / 1000) * GD_PX_PER_SEC;
-              return (
-                <div key={topic.id} className={styles.divider} style={{ top }}>
-                  <span>{topic.name}</span>
-                </div>
-              );
-            })}
             <div className={styles.laneOther}>
               {shown
                 .filter(({ line }) => line.speaker === '他者')
