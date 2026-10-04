@@ -31,8 +31,12 @@ export function forgetStream(stream: MediaStream | null | undefined) {
 }
 
 function endTrack(track: MediaStreamTrack) {
+  // Do not clear `enabled` first. Chrome ignores stop() on a disabled
+  // display or mic track and leaves it live, so the next recorder (or the
+  // next getDisplayMedia / getUserMedia) captures silence while hasLiveAudio
+  // still looks true.
   try {
-    track.enabled = false;
+    if (!track.enabled) track.enabled = true;
   } catch {
     /* already dead */
   }
@@ -47,6 +51,8 @@ function endTrack(track: MediaStreamTrack) {
  * Audio tracks first. Chrome ignores videoTrack.stop() while system audio is
  * still live, and macOS may not notice the audio stop until the next turn,
  * so a still-live display track is stopped again on a microtask and a short timer.
+ * Video is not stopped until audio has ended; muting either track is not a
+ * substitute for stop() (a muted live track records silence on reuse).
  */
 export function stopStreamTracks(stream: MediaStream) {
   const tracks = stream.getTracks();
@@ -55,20 +61,29 @@ export function stopStreamTracks(stream: MediaStream) {
   const other = tracks.filter(
     (track) => track.kind !== 'audio' && track.kind !== 'video'
   );
+  const audioLive = () => audio.some((track) => track.readyState === 'live');
   const endVideo = () => {
+    if (audioLive()) return;
     for (const track of video) endTrack(track);
+  };
+  const endAudio = () => {
+    for (const track of audio) {
+      if (track.readyState === 'live') endTrack(track);
+    }
+    for (const track of other) {
+      if (track.readyState === 'live') endTrack(track);
+    }
+    endVideo();
   };
   for (const track of audio) {
     if (video.length > 0 && track.readyState === 'live') {
       track.addEventListener('ended', endVideo, { once: true });
     }
-    endTrack(track);
   }
-  for (const track of other) endTrack(track);
-  endVideo();
-  if (video.some((track) => track.readyState !== 'ended')) {
-    queueMicrotask(endVideo);
-    setTimeout(endVideo, 50);
+  endAudio();
+  if (audioLive() || video.some((track) => track.readyState !== 'ended')) {
+    queueMicrotask(endAudio);
+    setTimeout(endAudio, 50);
   }
 }
 
@@ -114,13 +129,15 @@ export function ensureRecorderStops(
   }, afterMs);
 }
 
-/** Drop handlers and force the recorder inactive so it cannot keep a device. */
+/**
+ * Force the recorder inactive so it cannot keep a device.
+ * Handlers stay: clearing ondataavailable/onstop before the queued events
+ * run makes Chrome drop the final blob and sometimes never leave `recording`,
+ * which holds the mic or system-audio capturer for the next start.
+ */
 export function silenceRecorder(recorder: MediaRecorder | null | undefined) {
   if (!recorder) return;
   recorders.delete(recorder);
-  recorder.ondataavailable = null;
-  recorder.onerror = null;
-  recorder.onstop = null;
   if (recorder.state !== 'inactive') {
     try {
       recorder.stop();

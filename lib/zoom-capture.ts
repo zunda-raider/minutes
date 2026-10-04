@@ -64,11 +64,39 @@ export async function openSelfMic(): Promise<MediaStream | null> {
 /** Audio-only stream -> original display capture, so 停止 can end video too. */
 const displayRoots = new WeakMap<MediaStream, MediaStream>();
 
-/** True when the stream still has a live audio track (safe to record again). */
+/**
+ * True when the stream still has a live, enabled audio track (safe to record
+ * again). A disabled track is not reusable: Chrome keeps it `live` but the
+ * next MediaRecorder writes silence.
+ */
 export function hasLiveAudio(
   stream: MediaStream | null | undefined
 ): stream is MediaStream {
-  return !!stream?.getAudioTracks().some((track) => track.readyState === 'live');
+  return !!stream?.getAudioTracks().some(
+    (track) => track.readyState === 'live' && track.enabled
+  );
+}
+
+/**
+ * A held share must be recorded with every live track enabled. Hard-halt and
+ * the old acquire path disabled display video (and sometimes audio) without
+ * the track ending; ScreenCaptureKit then delivers silence until enabled is
+ * restored or the capturer is actually stopped.
+ */
+export function reviveHeldCapture(stream: MediaStream | null | undefined) {
+  if (!stream) return;
+  const root = displayRoots.get(stream);
+  const bundles = root && root !== stream ? [stream, root] : [stream];
+  for (const item of bundles) {
+    for (const track of item.getTracks()) {
+      if (track.readyState !== 'live' || track.enabled) continue;
+      try {
+        track.enabled = true;
+      } catch {
+        /* ended between the check and the write */
+      }
+    }
+  }
 }
 
 /** Stop every track on these streams, including the display capture they came from. */
@@ -106,21 +134,18 @@ export async function acquireSystemAudio(): Promise<MediaStream> {
   // Prefer to end video immediately so frames are not composited for the whole
   // meeting. Chrome often ignores that stop() while the audio track is still
   // live; the track stays in this stream so a later halt can stop audio first,
-  // then video. Until then, mute it and ask for no frames.
+  // then video. Do not mute it or constrain frameRate while it is still live:
+  // that silences system audio for the rest of the share.
   for (const track of displayStream.getVideoTracks()) {
     try {
       track.stop();
     } catch {
       /* already ended */
     }
-    if (track.readyState === 'live') {
-      track.enabled = false;
-      try {
-        void track.applyConstraints({ frameRate: 0, width: 1, height: 1 });
-      } catch {
-        /* display tracks often reject size constraints */
-      }
-    }
+    // If Chrome ignored stop() because system audio is still live, leave the
+    // video track enabled. enabled=false or frameRate:0 stops the capturer
+    // from producing audio samples while the audio track stays "live", so
+    // every later recorder (including a soft-stop reuse) is silent.
   }
 
   if (audioTracks.length === 0) {
@@ -200,6 +225,8 @@ export function startZoomSegmentRecorder(opts: {
 
   const arm = () => {
     if (!want || ended) return;
+    reviveHeldCapture(opts.system);
+    reviveHeldCapture(opts.mic);
     const offsetSec = (performance.now() - origin) / 1000;
     const systemChunks: Blob[] = [];
     const micChunks: Blob[] = [];

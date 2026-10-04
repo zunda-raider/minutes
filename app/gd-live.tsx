@@ -17,6 +17,7 @@ import {
   acquireSystemAudio,
   hasLiveAudio,
   openSelfMic,
+  reviveHeldCapture,
   startZoomSegmentRecorder,
   stopMediaTracks,
   type ZoomChunk,
@@ -453,6 +454,8 @@ export function GdLive({ onBack, onHarbor }: Props) {
 
     let stream = systemRef.current;
     let mic = micRef.current;
+    reviveHeldCapture(stream);
+    reviveHeldCapture(mic);
     if (!hasLiveAudio(stream)) {
       stopMediaTracks(stream, mic);
       systemRef.current = null;
