@@ -22,6 +22,7 @@ import {
   type ZoomChunk,
   type ZoomRecorder,
 } from '@/lib/zoom-capture';
+import { captureGeneration, registerHaltHook, trackAbort, trackClock } from '@/lib/capture-resources';
 import { watchLiveCapture } from '@/lib/live-capture';
 import { StopShareButton } from './stop-share';
 
@@ -154,10 +155,22 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const releasingRef = useRef(false);
   const aliveRef = useRef(true);
   const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const queueEpochRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
   const feedRef = useRef<Feed>('live');
   const phaseRef = useRef(phase);
   feedRef.current = feed;
   phaseRef.current = phase;
+
+  useEffect(() => {
+    return registerHaltHook(() => {
+      queueEpochRef.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      queueRef.current = Promise.resolve();
+      setPending(0);
+    });
+  }, []);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -176,7 +189,15 @@ export function GdLive({ onBack, onHarbor }: Props) {
   useEffect(() => {
     if (phase !== 'live') return;
     let frame = 0;
+    let dead = false;
+    const cancel = () => {
+      dead = true;
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+    };
+    const untrack = trackClock(cancel);
     const loop = () => {
+      if (dead) return;
       const ms =
         baseRef.current + (performance.now() - originRef.current) * speedRef.current;
       if (ms >= GD_LIVE_DURATION_MS) {
@@ -194,7 +215,10 @@ export function GdLive({ onBack, onHarbor }: Props) {
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancel();
+      untrack();
+    };
   }, [phase]);
 
   useEffect(() => {
@@ -219,12 +243,21 @@ export function GdLive({ onBack, onHarbor }: Props) {
     setPhase('live');
   }
 
-  function enqueueChunk(chunk: ZoomChunk) {
+  function enqueueChunk(chunk: ZoomChunk, epoch: number) {
+    if (queueEpochRef.current !== epoch) return;
     setPending((count) => count + 1);
+    const controller = trackAbort(new AbortController());
+    abortRef.current = controller;
     queueRef.current = queueRef.current.then(async () => {
+      if (queueEpochRef.current !== epoch) return;
       try {
-        const found = await transcribeZoomChunk(chunk.systemBlob, chunk.micBlob, 'ja');
-        if (!aliveRef.current || found.length === 0) return;
+        const found = await transcribeZoomChunk(
+          chunk.systemBlob,
+          chunk.micBlob,
+          'ja',
+          controller.signal
+        );
+        if (queueEpochRef.current !== epoch || !aliveRef.current || found.length === 0) return;
         setUtterances((prev) => [
           ...prev,
           ...found.map((line, index) => ({
@@ -235,11 +268,15 @@ export function GdLive({ onBack, onHarbor }: Props) {
           })),
         ]);
       } catch (err) {
+        if (queueEpochRef.current !== epoch || controller.signal.aborted) return;
         console.error('gd live transcribe failed:', err);
         if (!aliveRef.current) return;
         setNotice(err instanceof Error ? err.message : '文字起こしに失敗しました。');
       } finally {
-        if (aliveRef.current) setPending((count) => Math.max(0, count - 1));
+        if (abortRef.current === controller) abortRef.current = null;
+        if (aliveRef.current && queueEpochRef.current === epoch) {
+          setPending((count) => Math.max(0, count - 1));
+        }
       }
     });
   }
@@ -274,11 +311,12 @@ export function GdLive({ onBack, onHarbor }: Props) {
     }, watched);
 
     let failedSync = false;
+    const epoch = queueEpochRef.current;
     handle = startZoomSegmentRecorder({
       system: stream,
       mic,
       segmentMs: GD_LIVE_SEGMENT_MS,
-      onChunk: enqueueChunk,
+      onChunk: (chunk) => enqueueChunk(chunk, epoch),
       onEnded: (reason) => {
         failedSync = true;
         handle = null;
@@ -322,6 +360,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
   async function start() {
     if (phase === 'live' || arming) return;
     setNotice('');
+    const generation = captureGeneration();
     if (feedRef.current === 'demo') {
       setMicWarn('');
       releaseRef.current?.();
@@ -372,16 +411,16 @@ export function GdLive({ onBack, onHarbor }: Props) {
         return;
       }
       mic = await selfMicPromise;
-      if (!aliveRef.current) {
+      if (!aliveRef.current || generation !== captureGeneration()) {
         stopMediaTracks(stream, mic);
-        setArming(false);
+        if (aliveRef.current) setArming(false);
         return;
       }
     } else if (!hasLiveAudio(mic)) {
       mic = await openSelfMic();
-      if (!aliveRef.current) {
-        mic?.getTracks().forEach((track) => track.stop());
-        setArming(false);
+      if (!aliveRef.current || generation !== captureGeneration()) {
+        stopMediaTracks(mic);
+        if (aliveRef.current) setArming(false);
         return;
       }
     }

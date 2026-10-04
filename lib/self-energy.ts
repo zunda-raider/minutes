@@ -1,3 +1,5 @@
+import { trackAudioContext } from '@/lib/capture-resources';
+
 /**
  * Zoom/system mode only: compare a parallel mic stream against system audio
  * to tag 自分 (A) vs それ以外 (C). Mic-only recording must not call this.
@@ -76,7 +78,7 @@ export async function decodeMonoPcm(
   blob: Blob
 ): Promise<{ samples: Float32Array; sampleRate: number } | null> {
   if (typeof AudioContext === 'undefined') return null;
-  const ctx = new AudioContext();
+  const ctx = trackAudioContext(new AudioContext());
   try {
     const buf = await blob.arrayBuffer();
     const audio = await ctx.decodeAudioData(buf.slice(0));

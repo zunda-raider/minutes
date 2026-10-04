@@ -4,6 +4,16 @@
  * parallel mic used only to tell 自分 from everyone else.
  */
 
+import {
+  clearTrackedInterval,
+  forgetStream,
+  rememberStream,
+  silenceRecorder,
+  stopStreamTracks,
+  trackInterval,
+  trackRecorder,
+} from '@/lib/capture-resources';
+
 export const ZOOM_SEGMENT_MS = 60_000;
 
 export const SYSTEM_AUDIO_HELP =
@@ -30,7 +40,7 @@ export function pickRecorderMimeType(): string {
 /** Parallel mic for 自分 energy. Null when permission or the device fails. */
 export async function openSelfMic(): Promise<MediaStream | null> {
   try {
-    return await navigator.mediaDevices.getUserMedia({
+    const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -38,6 +48,8 @@ export async function openSelfMic(): Promise<MediaStream | null> {
       },
       video: false,
     });
+    rememberStream(stream);
+    return stream;
   } catch (err) {
     console.warn('self mic unavailable:', err);
     return null;
@@ -73,13 +85,10 @@ export function stopMediaTracks(...streams: Array<MediaStream | null | undefined
     }
   }
   for (const stream of pending) {
-    for (const track of stream.getTracks()) {
-      try {
-        track.stop();
-      } catch {
-        /* already ended */
-      }
-    }
+    forgetStream(stream);
+    // Audio before video. Chrome ignores videoTrack.stop() while system audio
+    // is live, so a video stop during acquire does not actually end the capturer.
+    stopStreamTracks(stream);
   }
 }
 
@@ -91,9 +100,27 @@ export async function acquireSystemAudio(): Promise<MediaStream> {
     windowAudio: 'system',
   };
   const displayStream = await navigator.mediaDevices.getDisplayMedia(options);
+  rememberStream(displayStream);
   const audioTracks = displayStream.getAudioTracks();
-  // Drop frames now. The display stream stays linked so 停止 can end the share.
-  displayStream.getVideoTracks().forEach((track) => track.stop());
+  // Prefer to end video immediately so frames are not composited for the whole
+  // meeting. Chrome often ignores that stop() while the audio track is still
+  // live; the track stays in this stream so a later halt can stop audio first,
+  // then video. Until then, mute it and ask for no frames.
+  for (const track of displayStream.getVideoTracks()) {
+    try {
+      track.stop();
+    } catch {
+      /* already ended */
+    }
+    if (track.readyState === 'live') {
+      track.enabled = false;
+      try {
+        void track.applyConstraints({ frameRate: 0, width: 1, height: 1 });
+      } catch {
+        /* display tracks often reject size constraints */
+      }
+    }
+  }
 
   if (audioTracks.length === 0) {
     stopMediaTracks(displayStream);
@@ -102,6 +129,7 @@ export async function acquireSystemAudio(): Promise<MediaStream> {
 
   const audioOnly = new MediaStream(audioTracks);
   displayRoots.set(audioOnly, displayStream);
+  rememberStream(audioOnly);
   return audioOnly;
 }
 
@@ -136,17 +164,33 @@ export function startZoomSegmentRecorder(opts: {
   let reason: 'stopped' | 'share-ended' | 'error' = 'stopped';
   let timer: ReturnType<typeof setInterval> | null = null;
   let systemRecorder: MediaRecorder | null = null;
+  let micRecorder: MediaRecorder | null = null;
 
   const stopTracks = () => {
     stopMediaTracks(opts.system, opts.mic);
+  };
+
+  const clearTimer = () => {
+    clearTrackedInterval(timer);
+    timer = null;
   };
 
   const finish = () => {
     if (ended) return;
     ended = true;
     want = false;
-    if (timer) clearInterval(timer);
-    timer = null;
+    clearTimer();
+    const mic = micRecorder;
+    micRecorder = null;
+    // If the system recorder never reached onstop, the self-mic recorder would
+    // keep the microphone open. Soft stop still flushes a live mic via requestStop.
+    if (mic && mic.state !== 'inactive') {
+      try {
+        mic.stop();
+      } catch {
+        /* already stopping */
+      }
+    }
     // Soft stop keeps display + system audio and the self mic.
     // Share-ended and errors drop the tracks. Top-bar 停止 stops them itself.
     if (reason !== 'stopped') stopTracks();
@@ -173,7 +217,7 @@ export function startZoomSegmentRecorder(opts: {
       finish();
       return;
     }
-    systemRecorder = recorder;
+    systemRecorder = trackRecorder(recorder);
 
     const micLive =
       opts.mic != null &&
@@ -181,22 +225,27 @@ export function startZoomSegmentRecorder(opts: {
     let nextMic: MediaRecorder | null = null;
     if (micLive && opts.mic) {
       try {
-        nextMic = new MediaRecorder(opts.mic, { mimeType });
+        nextMic = trackRecorder(new MediaRecorder(opts.mic, { mimeType }));
         nextMic.ondataavailable = (event) => {
           if (event.data.size > 0) micChunks.push(event.data);
         };
         micDone = false;
+        micRecorder = nextMic;
       } catch (err) {
         console.warn('self mic recorder failed:', err);
         nextMic = null;
+        micRecorder = null;
         micDone = true;
       }
+    } else {
+      micRecorder = null;
     }
 
     const finishSegment = () => {
       if (!systemDone || !micDone || settled) return;
       settled = true;
       if (systemRecorder === recorder) systemRecorder = null;
+      if (micRecorder === nextMic) micRecorder = null;
       if (systemBlob && systemBlob.size > 0) {
         opts.onChunk({ offsetSec, systemBlob, micBlob });
       }
@@ -259,31 +308,52 @@ export function startZoomSegmentRecorder(opts: {
         nextMic.start(1000);
       } catch (err) {
         console.warn('self mic start failed:', err);
+        silenceRecorder(nextMic);
         nextMic = null;
+        if (micRecorder && micRecorder.state === 'inactive') micRecorder = null;
         micDone = true;
       }
     }
   };
 
   const requestStop = (why: 'stopped' | 'share-ended' | 'error') => {
+    // Always drop the rotate interval, even when finish() already set ended
+    // before the timer id was stored.
+    clearTimer();
     if (ended) return;
     reason = why;
     want = false;
     rotate = false;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-    const rec = systemRecorder;
-    if (rec && rec.state !== 'inactive') {
-      try {
-        rec.stop();
-      } catch {
-        finish();
-      }
+    const sys = systemRecorder;
+    const mic = micRecorder;
+    const sysLive = !!sys && sys.state !== 'inactive';
+    const micLive = !!mic && mic.state !== 'inactive';
+    if (!sysLive && !micLive) {
+      finish();
       return;
     }
-    finish();
+    let stopping = false;
+    if (sysLive && sys) {
+      try {
+        sys.stop();
+        stopping = true;
+      } catch {
+        /* stop already queued onstop, or the recorder never started */
+      }
+    }
+    // System onstop stops the mic recorder after the system blob is sealed.
+    // Stopping both here races that and drops the self-mic blob. Only stop the
+    // mic directly when the system recorder will not reach onstop.
+    if (!stopping && micLive && mic) {
+      try {
+        mic.stop();
+        stopping = true;
+      } catch {
+        /* already stopping */
+      }
+    }
+    // If nothing accepted stop(), no onstop is coming — end now so the timer stays dead.
+    if (!stopping) finish();
   };
 
   opts.system.getAudioTracks().forEach((track) => {
@@ -294,17 +364,26 @@ export function startZoomSegmentRecorder(opts: {
   });
 
   arm();
-  timer = setInterval(() => {
-    if (!want || ended) return;
-    const rec = systemRecorder;
-    if (!rec || rec.state !== 'recording') return;
-    rotate = true;
-    try {
-      rec.stop();
-    } catch {
-      rotate = false;
-    }
-  }, segmentMs);
+  if (ended) {
+    clearTimer();
+  } else {
+    timer = trackInterval(
+      setInterval(() => {
+        if (!want || ended) {
+          clearTimer();
+          return;
+        }
+        const rec = systemRecorder;
+        if (!rec || rec.state !== 'recording') return;
+        rotate = true;
+        try {
+          rec.stop();
+        } catch {
+          rotate = false;
+        }
+      }, segmentMs)
+    );
+  }
 
   return {
     stop: () => requestStop('stopped'),
