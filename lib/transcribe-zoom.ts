@@ -25,7 +25,9 @@ export async function transcribeZoomChunk(
   systemBlob: Blob,
   micBlob: Blob | null,
   lang = 'ja',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  /** 1 = WHISPER_MODEL, 2 = WHISPER_MODEL2. Omitted stays on the server default (1). */
+  modelKey?: 1 | 2
 ): Promise<ZoomUtterance[]> {
   const formData = new FormData();
   formData.append(
@@ -33,6 +35,7 @@ export async function transcribeZoomChunk(
     new File([systemBlob], 'audio.webm', { type: systemBlob.type || 'audio/webm' })
   );
   formData.append('lang', lang);
+  if (modelKey != null) formData.append('modelKey', String(modelKey));
 
   const res = await fetch('/api/transcribe', { method: 'POST', body: formData, signal });
   let data: TranscribePayload;

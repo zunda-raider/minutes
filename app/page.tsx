@@ -532,6 +532,7 @@ export default function Home() {
           new File([blob], 'audio.webm', { type: blob.type || mimeTypeRef.current })
         );
         formData.append('lang', langRef.current);
+        formData.append('modelKey', '1');
 
         const res = await fetch('/api/transcribe', {
           method: 'POST',

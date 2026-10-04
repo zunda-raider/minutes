@@ -49,6 +49,17 @@ type Props = {
 
 const SPEEDS: Speed[] = [1, 2, 4];
 const MIC_WARN = 'マイクが使えないため、発言はすべて他者側に載ります。';
+const MODEL_KEY_STORAGE = 'minutes.gd.whisperModelKey.v1';
+
+type WhisperModelKey = 1 | 2;
+
+function storedModelKey(): WhisperModelKey {
+  try {
+    return window.localStorage.getItem(MODEL_KEY_STORAGE) === '1' ? 1 : 2;
+  } catch {
+    return 2;
+  }
+}
 
 function formatClock(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000 - 1e-9));
@@ -141,6 +152,12 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const [arming, setArming] = useState(false);
   const [notice, setNotice] = useState('');
   const [micWarn, setMicWarn] = useState('');
+  const [modelKey, setModelKey] = useState<WhisperModelKey>(2);
+  const [modelLabels, setModelLabels] = useState<{ 1: string; 2: string; fallback: boolean }>({
+    1: '',
+    2: '',
+    fallback: false,
+  });
 
   const baseRef = useRef(0);
   const originRef = useRef(0);
@@ -159,8 +176,43 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const abortRef = useRef<AbortController | null>(null);
   const feedRef = useRef<Feed>('live');
   const phaseRef = useRef(phase);
+  const modelKeyRef = useRef<WhisperModelKey>(2);
   feedRef.current = feed;
   phaseRef.current = phase;
+  modelKeyRef.current = modelKey;
+
+  useEffect(() => {
+    const saved = storedModelKey();
+    setModelKey(saved);
+    modelKeyRef.current = saved;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/config');
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          whisperModels?: {
+            '1'?: { label?: string };
+            '2'?: { label?: string; fallback?: boolean };
+          };
+        };
+        if (cancelled || !data.whisperModels) return;
+        setModelLabels({
+          1: data.whisperModels['1']?.label?.trim() || '',
+          2: data.whisperModels['2']?.label?.trim() || '',
+          fallback: Boolean(data.whisperModels['2']?.fallback),
+        });
+      } catch (err) {
+        console.error('gd model config failed:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     return registerHaltHook(() => {
@@ -255,7 +307,8 @@ export function GdLive({ onBack, onHarbor }: Props) {
           chunk.systemBlob,
           chunk.micBlob,
           'ja',
-          controller.signal
+          controller.signal,
+          modelKeyRef.current
         );
         if (queueEpochRef.current !== epoch || !aliveRef.current || found.length === 0) return;
         setUtterances((prev) => [
@@ -559,6 +612,25 @@ export function GdLive({ onBack, onHarbor }: Props) {
       ? '開始すると、ダミーの発言が実時間で上に出ます。左が他者、右が自分。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。'
       : '開始すると、画面共有でZoomなどの音声を取ります。Whisperの区間が、左は他者・右は自分で載ります。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。';
 
+  function chooseModel(next: WhisperModelKey) {
+    modelKeyRef.current = next;
+    setModelKey(next);
+    try {
+      window.localStorage.setItem(MODEL_KEY_STORAGE, String(next));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  const activeModelLabel =
+    modelKey === 2 && modelLabels.fallback
+      ? modelLabels[1]
+        ? `${modelLabels[1]}と同じ`
+        : ''
+      : modelKey === 2
+        ? modelLabels[2]
+        : modelLabels[1];
+
   return (
     <div className={styles.stage}>
       <header className={styles.hud}>
@@ -667,6 +739,34 @@ export function GdLive({ onBack, onHarbor }: Props) {
               デモ
             </button>
           </div>
+          {feed === 'live' ? (
+            <div className={styles.speeds} role="group" aria-label="文字起こし">
+              <span className={styles.modelTag}>文字起こし</span>
+              <button
+                type="button"
+                className={modelKey === 2 ? styles.speedOn : styles.speed}
+                aria-pressed={modelKey === 2}
+                title={
+                  modelLabels.fallback
+                    ? 'WHISPER_MODEL2 未設定'
+                    : modelLabels[2] || 'WHISPER_MODEL2'
+                }
+                onClick={() => chooseModel(2)}
+              >
+                速い
+              </button>
+              <button
+                type="button"
+                className={modelKey === 1 ? styles.speedOn : styles.speed}
+                aria-pressed={modelKey === 1}
+                title={modelLabels[1] || 'WHISPER_MODEL'}
+                onClick={() => chooseModel(1)}
+              >
+                精密
+              </button>
+              {activeModelLabel ? <span className={styles.modelName}>{activeModelLabel}</span> : null}
+            </div>
+          ) : null}
           {feed === 'demo' ? (
             <div className={styles.speeds} role="group" aria-label="ダミーの速度">
               {SPEEDS.map((value) => (

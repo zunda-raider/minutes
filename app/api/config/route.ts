@@ -2,13 +2,15 @@ import { NextResponse } from 'next/server';
 import { getWhisperLangConfig, langLabel } from '@/lib/whisper-lang';
 import { getOllamaBaseUrl, getOllamaModel, resolveOllamaBin } from '@/lib/ollama';
 import { getDiarizeConfig } from '@/lib/whisper-diarize';
+import { getWhisperModelSlots } from '@/lib/whisper-model';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const { defaultLang, langs } = getWhisperLangConfig();
-  const whisperModel = process.env.WHISPER_MODEL?.trim() || '';
+  const models = getWhisperModelSlots();
+  const whisperModel = models.model1;
   const diarize = getDiarizeConfig(whisperModel);
   const provider = (process.env.TRANSLATE_PROVIDER?.trim() || 'auto').toLowerCase();
   const openaiConfigured = Boolean(
@@ -29,6 +31,7 @@ export async function GET() {
       bin: resolveOllamaBin(),
     },
     openaiConfigured,
+    whisperModels: models.slots,
     diarize: {
       enabled: diarize.enabled,
       mode: diarize.mode,

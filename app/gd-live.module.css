@@ -313,6 +313,22 @@
   background: #f6d48a;
 }
 
+.modelTag,
+.modelName {
+  align-self: center;
+  color: rgba(248, 241, 227, 0.72);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.modelName {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
 .dummyNote,
 .captureError {
   margin: 0;
