@@ -160,6 +160,17 @@ export async function POST(req: Request) {
         ).trim()
       : '';
 
+  const recording =
+    body &&
+    typeof body === 'object' &&
+    (body as { recording?: unknown }).recording === true;
+  if (recording) {
+    return NextResponse.json(
+      { error: '録音中は翻訳しません。Ollamaは要約だけです。' },
+      { status: 503 }
+    );
+  }
+
   const provider = getProvider();
   const errors: string[] = [];
 

@@ -174,6 +174,9 @@ export function GdLive({ onBack, onHarbor }: Props) {
       const ms =
         baseRef.current + (performance.now() - originRef.current) * speedRef.current;
       if (ms >= GD_LIVE_DURATION_MS) {
+        const release = releaseRef.current;
+        releaseRef.current = null;
+        release?.();
         baseRef.current = GD_LIVE_DURATION_MS;
         elapsedRef.current = GD_LIVE_DURATION_MS;
         setElapsedMs(GD_LIVE_DURATION_MS);
@@ -254,6 +257,19 @@ export function GdLive({ onBack, onHarbor }: Props) {
     setNotice('');
     if (feedRef.current === 'demo') {
       setMicWarn('');
+      releaseRef.current?.();
+      releaseRef.current = watchLiveCapture(() => {
+        releaseRef.current = null;
+        const ms = Math.min(
+          GD_LIVE_DURATION_MS,
+          baseRef.current + (performance.now() - originRef.current) * speedRef.current
+        );
+        baseRef.current = ms;
+        elapsedRef.current = ms;
+        setElapsedMs(ms);
+        if (!aliveRef.current) return;
+        setPhase((current) => (current === 'live' ? 'ended' : current));
+      }, []);
       beginClock();
       return;
     }

@@ -6,7 +6,6 @@ import gd from './gd.module.css';
 import { GdLive } from './gd-live';
 import { StopShareButton } from './stop-share';
 import {
-  coerceGdAnalysis,
   formatGdNote,
   gdSpeakerFromId,
   layoutVoyage,
@@ -105,16 +104,6 @@ function speakerCaption(entry: GdHistoryEntry): string {
   const quiet = quietSpeakerTag(entry.speakerId, entry.source);
   if (quiet && quiet !== role) return `${role}（${quiet}）`;
   return role;
-}
-
-function isAnalysis(value: unknown): value is GdAnalysis {
-  if (!value || typeof value !== 'object') return false;
-  const rec = value as Record<string, unknown>;
-  return (
-    typeof rec.conclusion === 'string' &&
-    Array.isArray(rec.topics) &&
-    Array.isArray(rec.mappings)
-  );
 }
 
 function smoothDetour(
@@ -586,7 +575,7 @@ function Leaf({
   );
 }
 
-export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
+export function GdScreen({ entries, historyReady, onBack }: Props) {
   const ordered = useMemo(
     () => [...entries].sort((a, b) => a.note - b.note),
     [entries]
@@ -594,10 +583,9 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   const [picked, setPicked] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<GdAnalysis | null>(null);
-  const [snapshot, setSnapshot] = useState<GdHistoryEntry[]>([]);
+  const [snapshot] = useState<GdHistoryEntry[]>([]);
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
   const [deck, setDeck] = useState<'live' | 'harbor'>('live');
 
@@ -633,57 +621,6 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
     });
   }
 
-  async function runAnalysis() {
-    const chosen = ordered.filter((entry) => selected.has(entry.id));
-    if (chosen.length === 0) {
-      setError('分析する発言を1件以上選んでください。');
-      return;
-    }
-    setBusy(true);
-    setError('');
-    try {
-      const res = await fetch('/api/gd-analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          genre: genre.trim() || undefined,
-          utterances: chosen.map((entry) => ({
-            note: entry.note,
-            text: entryText(entry),
-            speaker: gdSpeakerFromId(entry.speakerId),
-          })),
-        }),
-      });
-      const data: unknown = await res.json().catch(() => null);
-      if (!res.ok) {
-        const message =
-          data &&
-          typeof data === 'object' &&
-          'error' in data &&
-          typeof (data as { error?: unknown }).error === 'string'
-            ? (data as { error: string }).error
-            : '分析に失敗しました。';
-        setError(message);
-        return;
-      }
-      const notes = chosen.map((entry) => entry.note);
-      const analysis = isAnalysis(data)
-        ? data
-        : coerceGdAnalysis(data, notes, data != null && typeof data === 'object');
-      setSnapshot(chosen);
-      setResult({
-        conclusion: typeof analysis.conclusion === 'string' ? analysis.conclusion : '',
-        topics: Array.isArray(analysis.topics) ? analysis.topics : [],
-        mappings: Array.isArray(analysis.mappings) ? analysis.mappings : [],
-        warning: analysis.warning,
-      });
-      setActiveTopic(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '分析に失敗しました。');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const selfByNote = useMemo(() => {
     const map = new Map<string, boolean>();
@@ -878,6 +815,9 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
       </header>
 
       <section className={gd.lobby} aria-label="出航ロビー">
+        <p className={gd.stub} role="status">
+          Ollamaはいま要約だけです。分析と出航は止めています。
+        </p>
         <DockedVoyage crates={selectedCount} />
         <p className={gd.lobbyCaption}>
           {historyReady
@@ -985,14 +925,9 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
                   ? `${selectedCount}枚を船に積みました`
                   : '積み荷が空です'}
               </p>
-              <button
-                type="button"
-                className={gd.sailButton}
-                disabled={busy || !historyReady || selectedCount === 0}
-                onClick={() => void runAnalysis()}
-              >
-                <span className={gd.sailKicker}>{busy ? '航路を描いています' : '分析する'}</span>
-                <span>{busy ? '出航中…' : '出航'}</span>
+              <button type="button" className={gd.sailButton} disabled>
+                <span className={gd.sailKicker}>分析する</span>
+                <span>出航</span>
               </button>
             </div>
           </>
