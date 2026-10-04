@@ -976,6 +976,10 @@ export default function Home() {
       }
       heldSourceRef.current = source;
     } else if (source === 'system' && !hasLiveAudio(micStreamRef.current)) {
+      // A muted or ended mic still holds the device. Leaving it up makes the
+      // next getUserMedia come back silent.
+      stopMediaTracks(micStreamRef.current);
+      micStreamRef.current = null;
       const selfMic = await openSelfMic();
       if (generation !== captureGeneration()) {
         stopMediaTracks(selfMic);

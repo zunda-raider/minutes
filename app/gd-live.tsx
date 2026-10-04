@@ -30,7 +30,7 @@ import { GdLogicTree } from './gd-logic-tree';
 /** Real Zoom capture only. Home / minutes stays at about 60s. */
 const GD_LIVE_SEGMENT_MS = 20_000;
 
-type Phase = 'idle' | 'live' | 'ended';
+type Phase = 'idle' | 'live' | 'paused' | 'ended';
 
 type BoardLine = DemoLine & { id: string };
 
@@ -193,6 +193,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
   const [utterances, setUtterances] = useState<BoardLine[]>([]);
   const [pending, setPending] = useState(0);
   const [arming, setArming] = useState(false);
+  const armingRef = useRef(false);
   const [notice, setNotice] = useState('');
   const [micWarn, setMicWarn] = useState('');
   const [modelKey, setModelKey] = useState<WhisperModelKey>(2);
@@ -362,14 +363,41 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     setPhase('live');
   }
 
+  /** Continue the paused session. Elapsed stays where 中断 froze it. */
+  function resumeClock() {
+    originRef.current = performance.now();
+    scrollerRef.current?.scrollTo(0, 0);
+    setPhase('live');
+  }
+
+  function pause() {
+    if (phaseRef.current !== 'live' || endingRef.current) return;
+    cancelClockRef.current?.();
+    const ms = Math.min(
+      durationRef.current,
+      baseRef.current + (performance.now() - originRef.current)
+    );
+    baseRef.current = ms;
+    originRef.current = performance.now();
+    elapsedRef.current = ms;
+    setElapsedMs(ms);
+    const recorder = captureRef.current;
+    captureRef.current = null;
+    // Soft stop: recorder and its rotate timer die, share and watch stay.
+    if (recorder) recorder.stop();
+    setPhase('paused');
+  }
+
   function enqueueChunk(chunk: ZoomChunk, epoch: number) {
     if (queueEpochRef.current !== epoch) return;
+    const sessionGen = sessionGenRef.current;
     setPending((count) => count + 1);
     const controller = trackAbort(new AbortController());
     abortRef.current = controller;
     queueRef.current = queueRef.current.then(async () => {
       if (queueEpochRef.current !== epoch) return;
       try {
+        if (sessionGenRef.current !== sessionGen) return;
         const found = await transcribeZoomChunk(
           chunk.systemBlob,
           chunk.micBlob,
@@ -377,7 +405,14 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
           controller.signal,
           modelKeyRef.current
         );
-        if (queueEpochRef.current !== epoch || !aliveRef.current || found.length === 0) return;
+        if (
+          queueEpochRef.current !== epoch ||
+          sessionGenRef.current !== sessionGen ||
+          !aliveRef.current ||
+          found.length === 0
+        ) {
+          return;
+        }
         setUtterances((prev) => {
           const next = [
             ...prev,
@@ -405,7 +440,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     });
   }
 
-  function armCapture(stream: MediaStream, mic: MediaStream | null) {
+  function armCapture(stream: MediaStream, mic: MediaStream | null, timeOffsetSec: number) {
     systemRef.current = stream;
     micRef.current = mic;
     flushRef.current = new Promise<void>((resolve) => {
@@ -434,7 +469,11 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
         elapsedRef.current = ms;
         setElapsedMs(ms);
       }
-      setPhase((currentPhase) => (currentPhase === 'live' ? 'ended' : currentPhase));
+      // Hard halt kills the share. The board stays until the next 開始, which
+      // is a new GD — same as halting mid-recording.
+      setPhase((currentPhase) =>
+        currentPhase === 'live' || currentPhase === 'paused' ? 'ended' : currentPhase
+      );
     }, watched);
 
     let failedSync = false;
@@ -443,6 +482,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
       system: stream,
       mic,
       segmentMs: GD_LIVE_SEGMENT_MS,
+      timeOffsetSec,
       onChunk: (chunk) => enqueueChunk(chunk, epoch),
       onEnded: (reason) => {
         resolveFlushRef.current?.();
@@ -477,7 +517,7 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
         systemRef.current = null;
         micRef.current = null;
         if (!aliveRef.current) return;
-        if (phaseRef.current === 'live') {
+        if (phaseRef.current === 'live' || phaseRef.current === 'paused') {
           setNotice('画面共有が終了したため録音を停止しました。');
           endSessionRef.current();
         }
@@ -487,60 +527,82 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
   }
 
   async function start() {
-    if (phase === 'live' || arming) return;
+    if (phaseRef.current === 'live' || armingRef.current) return;
+    const resuming = phaseRef.current === 'paused';
     setNotice('');
-    sessionGenRef.current += 1;
-    endingRef.current = false;
-    publishedRef.current = false;
+    if (!resuming) {
+      sessionGenRef.current += 1;
+      endingRef.current = false;
+      publishedRef.current = false;
+    }
     const generation = captureGeneration();
+    armingRef.current = true;
     setArming(true);
     setMicWarn('');
 
-    let stream = systemRef.current;
-    let mic = micRef.current;
-    reviveHeldCapture(stream);
-    reviveHeldCapture(mic);
-    if (!hasLiveAudio(stream)) {
-      stopMediaTracks(stream, mic);
-      systemRef.current = null;
-      micRef.current = null;
-      const selfMicPromise = openSelfMic();
-      try {
-        stream = await acquireSystemAudio();
-      } catch (err) {
-        const leftover = await selfMicPromise;
-        stopMediaTracks(leftover);
-        console.error('GD live capture failed:', err);
-        if (aliveRef.current) setNotice(captureErrorMessage(err));
-        setArming(false);
-        return;
-      }
-      mic = await selfMicPromise;
-      if (!aliveRef.current || generation !== captureGeneration()) {
+    try {
+      let stream = systemRef.current;
+      let mic = micRef.current;
+      reviveHeldCapture(stream);
+      reviveHeldCapture(mic);
+      if (!hasLiveAudio(stream)) {
         stopMediaTracks(stream, mic);
-        if (aliveRef.current) setArming(false);
-        return;
-      }
-    } else if (!hasLiveAudio(mic)) {
-      mic = await openSelfMic();
-      if (!aliveRef.current || generation !== captureGeneration()) {
+        systemRef.current = null;
+        micRef.current = null;
+        const selfMicPromise = openSelfMic();
+        try {
+          stream = await acquireSystemAudio();
+        } catch (err) {
+          const leftover = await selfMicPromise;
+          stopMediaTracks(leftover);
+          console.error('GD live capture failed:', err);
+          if (aliveRef.current) setNotice(captureErrorMessage(err));
+          return;
+        }
+        mic = await selfMicPromise;
+        if (!aliveRef.current || generation !== captureGeneration()) {
+          stopMediaTracks(stream, mic);
+          return;
+        }
+      } else if (!hasLiveAudio(mic)) {
         stopMediaTracks(mic);
-        if (aliveRef.current) setArming(false);
+        micRef.current = null;
+        mic = await openSelfMic();
+        if (!aliveRef.current || generation !== captureGeneration()) {
+          stopMediaTracks(mic);
+          return;
+        }
+      }
+
+      const aborted =
+        !aliveRef.current ||
+        endingRef.current ||
+        (resuming && phaseRef.current !== 'paused');
+      if (aborted) {
+        // Drop a capturer this attempt just opened. A held share stays.
+        if (systemRef.current !== stream) stopMediaTracks(stream);
+        if (micRef.current !== mic) stopMediaTracks(mic);
         return;
       }
+      setMicWarn(mic ? '' : MIC_WARN);
+      const offsetSec = resuming ? elapsedRef.current / 1000 : 0;
+      const armed = armCapture(stream, mic, offsetSec);
+      if (!aliveRef.current || armed.failedSync) {
+        armed.handle?.stop();
+        return;
+      }
+      captureRef.current = armed.handle;
+      if (resuming) {
+        resumeClock();
+        return;
+      }
+      utterancesRef.current = [];
+      setUtterances([]);
+      beginClock();
+    } finally {
+      armingRef.current = false;
+      if (aliveRef.current) setArming(false);
     }
-
-    setMicWarn(mic ? '' : MIC_WARN);
-    const armed = armCapture(stream, mic);
-    setArming(false);
-    if (!aliveRef.current || armed.failedSync) {
-      armed.handle.stop();
-      return;
-    }
-    captureRef.current = armed.handle;
-    utterancesRef.current = [];
-    setUtterances([]);
-    beginClock();
   }
 
   function stop() {
@@ -557,26 +619,33 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     } catch {
       /* private mode */
     }
-    if (phaseRef.current === 'live' && elapsedRef.current >= next) {
+    if (
+      (phaseRef.current === 'live' || phaseRef.current === 'paused') &&
+      elapsedRef.current >= next
+    ) {
       endSessionRef.current();
     }
   }
 
   endSessionRef.current = () => {
-    if (phaseRef.current !== 'live' || endingRef.current) return;
+    const current = phaseRef.current;
+    if ((current !== 'live' && current !== 'paused') || endingRef.current) return;
     endingRef.current = true;
-    cancelClockRef.current?.();
-    const cap = durationRef.current;
-    const ms = Math.min(cap, baseRef.current + (performance.now() - originRef.current));
-    baseRef.current = ms;
-    elapsedRef.current = ms;
-    setElapsedMs(ms);
-    const recorder = captureRef.current;
-    captureRef.current = null;
-    if (recorder) recorder.stop();
-    else {
-      resolveFlushRef.current?.();
-      resolveFlushRef.current = null;
+    if (current === 'live') {
+      cancelClockRef.current?.();
+      const cap = durationRef.current;
+      const ms = Math.min(cap, baseRef.current + (performance.now() - originRef.current));
+      baseRef.current = ms;
+      originRef.current = performance.now();
+      elapsedRef.current = ms;
+      setElapsedMs(ms);
+      const recorder = captureRef.current;
+      captureRef.current = null;
+      if (recorder) recorder.stop();
+      else {
+        resolveFlushRef.current?.();
+        resolveFlushRef.current = null;
+      }
     }
     setPhase('ended');
     const publish = () => {
@@ -673,7 +742,8 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
     })
     .join('\n')
     .slice(-4000);
-  const phaseLabel = phase === 'live' ? '議論中' : phase === 'ended' ? '終了' : '待機';
+  const phaseLabel =
+    phase === 'live' ? '議論中' : phase === 'paused' ? '中断' : phase === 'ended' ? '終了' : '待機';
   const statusText = notice || micWarn;
   // Ended session, retained score, or mock preview from idle/live.
   const canOpenResult = phase === 'ended' || resultReady || phase === 'idle' || phase === 'live';
@@ -756,9 +826,17 @@ export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSe
               onClick={() => void start()}
               disabled={running || arming}
             >
-              {arming ? '許可待ち' : '開始'}
+              {arming ? '許可待ち' : phase === 'paused' ? '再開' : '開始'}
             </button>
-            <button type="button" className={styles.stop} onClick={stop} disabled={!running}>
+            <button type="button" className={styles.pause} onClick={pause} disabled={!running}>
+              中断
+            </button>
+            <button
+              type="button"
+              className={styles.stop}
+              onClick={stop}
+              disabled={phase !== 'live' && phase !== 'paused'}
+            >
               終了
             </button>
             <button
