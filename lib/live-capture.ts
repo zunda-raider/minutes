@@ -16,8 +16,8 @@ function emit() {
 }
 
 /**
- * Home Zoom recording and GD live share the same stop.
- * `stop` ends the recorder; every display, system-audio, and mic track is stopped too.
+ * Mic Home, Zoom Home, and GD live share one 停止.
+ * `stop` ends that mode's MediaRecorder; every display, system-audio, and mic track is stopped too.
  */
 export function watchLiveCapture(stop: () => void, streams: MediaStream[]): () => void {
   const entry: Entry = { stop, streams };
@@ -31,7 +31,7 @@ export function watchLiveCapture(stop: () => void, streams: MediaStream[]): () =
   };
 }
 
-/** End every Zoom/GD recorder and all of their MediaStream tracks. */
+/** End every mic, Zoom, and GD recorder, then stop all of their tracks. */
 export function haltLiveCapture() {
   const snapshot = [...entries];
   entries.clear();

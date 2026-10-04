@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import styles from './page.module.css';
 import gd from './gd.module.css';
 import { GdLive } from './gd-live';
-import { haltLiveCapture, useLiveCaptureOn } from '@/lib/live-capture';
+import { StopShareButton } from './stop-share';
 import {
   coerceGdAnalysis,
   formatGdNote,
@@ -41,23 +41,6 @@ const EFFECT_FILL: Record<GdEffect, string> = {
   脱線: '#fbbf24',
   停滞: '#cbd5e1',
 };
-
-function GdKicker() {
-  const shareOn = useLiveCaptureOn();
-  if (shareOn) {
-    return (
-      <button
-        type="button"
-        className="haltShare"
-        aria-label="録音と画面共有を停止"
-        onClick={() => haltLiveCapture()}
-      >
-        停止
-      </button>
-    );
-  }
-  return <p className={gd.lobbyKicker}>GDモード</p>;
-}
 
 function entryText(entry: GdHistoryEntry): string {
   const ja = entry.textJa?.trim();
@@ -748,7 +731,8 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             Home
           </button>
           <div className={gd.lobbyHeading}>
-            <GdKicker />
+            <p className={gd.lobbyKicker}>GDモード</p>
+            <StopShareButton />
             <h1 className={gd.lobbyTitle}>分析結果</h1>
             <p className={gd.lobbyLead}>航海図と論点の木。ライブ盤と同じ海の色で、静かに読みます。</p>
           </div>
@@ -881,7 +865,8 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
           Home
         </button>
         <div className={gd.lobbyHeading}>
-          <GdKicker />
+          <p className={gd.lobbyKicker}>GDモード</p>
+          <StopShareButton />
           <h1 className={gd.lobbyTitle}>出航準備</h1>
           <p className={gd.lobbyLead}>
             港で航海ログを選び、積み荷カードを積んでから出航します。分析と航海図・木は、出航のあとです。

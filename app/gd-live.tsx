@@ -21,7 +21,8 @@ import {
   type ZoomChunk,
   type ZoomRecorder,
 } from '@/lib/zoom-capture';
-import { haltLiveCapture, useLiveCaptureOn, watchLiveCapture } from '@/lib/live-capture';
+import { haltLiveCapture, watchLiveCapture } from '@/lib/live-capture';
+import { StopShareButton } from './stop-share';
 
 type Speed = 1 | 2 | 4;
 type Phase = 'idle' | 'live' | 'ended';
@@ -146,7 +147,6 @@ export function GdLive({ onBack, onHarbor }: Props) {
   const releaseRef = useRef<(() => void) | null>(null);
   const streamsRef = useRef<MediaStream[]>([]);
   const aliveRef = useRef(true);
-  const shareOn = useLiveCaptureOn();
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const feedRef = useRef<Feed>('live');
   const phaseRef = useRef(phase);
@@ -461,23 +461,10 @@ export function GdLive({ onBack, onHarbor }: Props) {
             Home
           </button>
           <div className={styles.brand}>
-            {shareOn || running ? (
-              <button
-                type="button"
-                className="haltShare"
-                aria-label="録音と画面共有を停止"
-                onClick={() => {
-                  haltLiveCapture();
-                  stop();
-                }}
-              >
-                停止
-              </button>
-            ) : (
-              <p className={styles.kicker}>GDモード</p>
-            )}
+            <p className={styles.kicker}>GDモード</p>
             <h1 className={styles.title}>ライブ</h1>
           </div>
+          <StopShareButton />
           <p className={styles.phase} data-phase={phase}>
             {phaseLabel}
           </p>
