@@ -24,6 +24,9 @@ import {
 import { haltLiveCapture, watchLiveCapture } from '@/lib/live-capture';
 import { StopShareButton } from './stop-share';
 
+/** Real Zoom capture only. Home / minutes stays at about 60s. */
+const GD_LIVE_SEGMENT_MS = 20_000;
+
 type Speed = 1 | 2 | 4;
 type Phase = 'idle' | 'live' | 'ended';
 type Feed = 'live' | 'demo';
@@ -326,6 +329,7 @@ export function GdLive({ onBack, onHarbor }: Props) {
     handle = startZoomSegmentRecorder({
       system: stream,
       mic,
+      segmentMs: GD_LIVE_SEGMENT_MS,
       onChunk: enqueueChunk,
       onEnded: (reason) => {
         failedSync = true;

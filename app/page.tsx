@@ -33,6 +33,7 @@ import {
   type ZoomCategoryId,
 } from '@/lib/speaker-letters';
 import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
+import { mergeSelectedCards } from '@/lib/merge-entries';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
@@ -60,7 +61,6 @@ import { buildStoreZip } from '@/lib/zip-store';
 import { GdScreen } from './gd-screen';
 import {
   SYSTEM_AUDIO_HELP,
-  ZOOM_SEGMENT_MS,
   acquireSystemAudio,
   openSelfMic,
   pickRecorderMimeType,
@@ -88,8 +88,8 @@ type TranscriptEntry = {
 type Screen = 'home' | 'note1' | 'note2' | 'gd';
 type AudioSource = 'mic' | 'system';
 
-/** Mic: shorter chunks. Zoom/system uses the shared one-minute windows. */
-const SEGMENT_MS_MIC = 25_000;
+/** Minutes / Home: Zoom and mic both rotate about once a minute. */
+const HOME_SEGMENT_MS = 60_000;
 
 function formatTime(iso: string): string {
   try {
@@ -432,8 +432,7 @@ export default function Home() {
     activeSpeakerRef.current = activeSpeakerId;
   }, [activeSpeakerId]);
 
-  const segmentMs =
-    audioSource === 'system' ? ZOOM_SEGMENT_MS : SEGMENT_MS_MIC;
+  const segmentMs = HOME_SEGMENT_MS;
 
   const stopTracks = () => {
     releaseLiveRef.current?.();
@@ -905,13 +904,9 @@ export default function Home() {
     setIsRecording(true);
 
     clearSegmentTimer();
-    const ms =
-      audioSourceRef.current === 'system'
-        ? ZOOM_SEGMENT_MS
-        : SEGMENT_MS_MIC;
     segmentTimerRef.current = setInterval(() => {
       rotateSegment();
-    }, ms);
+    }, HOME_SEGMENT_MS);
   };
 
   const stopRecording = () => {
@@ -1601,6 +1596,32 @@ export default function Home() {
     setArmedDelete(ids);
   };
 
+  const mergeSelected = () => {
+    const ids = selectedIdsRef.current;
+    if (ids.size < 2) return;
+    const next = mergeSelectedCards(entries, ids);
+    if (next === entries) return;
+    const keep = new Set(next.map((entry) => entry.id));
+    const dropped = [...ids].filter((id) => !keep.has(id));
+    setEntries(next);
+    setSelectedIds(new Set());
+    setSelectionKind('cards');
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    window.getSelection()?.removeAllRanges();
+    if (dropped.length === 0) return;
+    setAudioIds((prev) => {
+      if (![...prev].some((id) => dropped.includes(id))) return prev;
+      const audio = new Set(prev);
+      for (const id of dropped) audio.delete(id);
+      return audio;
+    });
+    void deleteAudioSegments(dropped).catch((err) =>
+      console.error('audio delete failed:', err)
+    );
+  };
+
   const assignSelectedBucket = (speakerId: number) => {
     const ids = selectedIdsRef.current;
     if (ids.size === 0) return;
@@ -1689,6 +1710,14 @@ export default function Home() {
             {bucket.label}
           </button>
         ))}
+        <button
+          type="button"
+          className={styles.assignMerge}
+          onClick={mergeSelected}
+          disabled={selectedIds.size < 2}
+        >
+          結合
+        </button>
         <button
           type="button"
           className={
