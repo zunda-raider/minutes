@@ -1,10 +1,12 @@
+/* GD 出航準備 / 分析結果 — live board と同系の海・ゲーム調パレット。動きは控えめ（分析向け） */
+
 .stub {
   margin: 0 0 0.9rem;
   padding: 0.75rem 0.9rem;
   border-radius: 12px;
-  border: 1px dashed rgba(251, 191, 36, 0.45);
-  background: rgba(251, 191, 36, 0.08);
-  color: #fde68a;
+  border: 1px dashed rgba(246, 212, 138, 0.4);
+  background: rgba(246, 212, 138, 0.08);
+  color: #f6d48a;
   font-size: 0.92rem;
   line-height: 1.5;
 }
@@ -28,11 +30,12 @@
 .pickerTitle {
   margin: 0;
   font-size: 1.05rem;
+  letter-spacing: 0.06em;
 }
 
 .pickerHelp {
   margin: 0.25rem 0 0;
-  color: var(--muted);
+  color: rgba(248, 241, 227, 0.62);
   font-size: 0.88rem;
   line-height: 1.45;
 }
@@ -54,8 +57,8 @@
   align-items: flex-start;
   padding: 0.65rem 0.75rem;
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: rgba(18, 24, 38, 0.8);
+  border: 1px solid rgba(246, 212, 138, 0.22);
+  background: rgba(12, 10, 16, 0.72);
 }
 
 .historyItem input {
@@ -68,21 +71,21 @@
   flex-wrap: wrap;
   align-items: center;
   font-size: 0.78rem;
-  color: var(--muted);
+  color: rgba(248, 241, 227, 0.62);
 }
 
 .note {
   font-variant-numeric: tabular-nums;
-  color: var(--text);
+  color: #f8f1e3;
   font-weight: 650;
 }
 
 .selfTag {
-  color: #6ee7b7;
+  color: #5eead4;
 }
 
 .otherTag {
-  color: #cbd5e1;
+  color: #7dd3fc;
 }
 
 .historyText {
@@ -104,26 +107,34 @@
   border-radius: 999px;
   padding: 0.7rem 1.2rem;
   font: inherit;
-  font-weight: 650;
-  color: #041018;
-  background: linear-gradient(180deg, #7dd3fc, #38bdf8);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #052016;
+  background: linear-gradient(180deg, #99f6e4, #2dd4bf);
+  box-shadow: 0 3px 0 #0f766e;
   cursor: pointer;
 }
 
 .analyzeButton:disabled {
   opacity: 0.55;
   cursor: progress;
+  box-shadow: none;
 }
 
 .ghost {
   appearance: none;
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--text);
+  border: 1px solid rgba(246, 212, 138, 0.4);
+  background: rgba(255, 244, 214, 0.06);
+  color: #f8f1e3;
   border-radius: 999px;
   padding: 0.55rem 0.9rem;
   font: inherit;
+  font-weight: 700;
   cursor: pointer;
+}
+
+.ghost:hover {
+  background: rgba(255, 244, 214, 0.12);
 }
 
 .error {
@@ -134,7 +145,7 @@
 
 .warn {
   margin: 0 0 0.75rem;
-  color: #fde68a;
+  color: #f6d48a;
   font-size: 0.88rem;
 }
 
@@ -147,27 +158,33 @@
 }
 
 .panel {
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: rgba(14, 18, 27, 0.88);
+  border: 1px solid rgba(246, 212, 138, 0.42);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(28, 20, 12, 0.92), rgba(12, 10, 16, 0.88));
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 214, 0.04);
   padding: 0.9rem 0.9rem 1rem;
 }
 
 .panelTitle {
   margin: 0;
-  font-size: 1.05rem;
-  letter-spacing: 0.04em;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #f6d48a;
 }
 
 .conclusion {
   margin: 0.45rem 0 0.75rem;
   font-size: 1rem;
   line-height: 1.55;
+  font-weight: 650;
+  color: #f8f1e3;
 }
 
 .conclusionEmpty {
   margin: 0.45rem 0 0.75rem;
-  color: var(--muted);
+  color: rgba(248, 241, 227, 0.55);
 }
 
 .sea {
@@ -175,22 +192,24 @@
   height: auto;
   display: block;
   border-radius: 14px;
-  background: #082f49;
+  background: #0a1018;
   font-family: inherit;
+  border: 1px solid rgba(246, 212, 138, 0.22);
 }
 
 .waveDrift {
   transform-box: view-box;
   transform-origin: 0 0;
-  animation: gdWaveSlide 18s linear infinite;
+  /* 分析画面ではほぼ静止。わずかなドリフトのみ */
+  animation: gdWaveSlide 48s linear infinite;
 }
 
 .waveFill {
-  fill: rgba(186, 230, 253, 0.22);
+  fill: rgba(246, 212, 138, 0.06);
 }
 
 .waveFillDeep {
-  fill: rgba(224, 242, 254, 0.16);
+  fill: rgba(125, 211, 252, 0.05);
 }
 
 @keyframes gdWaveSlide {
@@ -211,7 +230,7 @@
   margin: 0.65rem 0 0;
   padding: 0;
   list-style: none;
-  color: var(--muted);
+  color: rgba(248, 241, 227, 0.62);
   font-size: 0.82rem;
 }
 
@@ -244,7 +263,8 @@
   width: 12px;
   flex: none;
   border-radius: 999px;
-  background: linear-gradient(#a16207, #5c3b12);
+  background: linear-gradient(180deg, #f6d48a, rgba(246, 212, 138, 0.15));
+  box-shadow: 0 0 12px rgba(246, 212, 138, 0.2);
 }
 
 .roots,
@@ -255,9 +275,9 @@
 }
 
 .branchList {
-  margin-left: 0.8rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid rgba(134, 239, 172, 0.35);
+  margin-left: 0.55rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid rgba(246, 212, 138, 0.5);
 }
 
 .branch {
@@ -266,19 +286,22 @@
 
 .branchButton {
   appearance: none;
-  border: 1px solid rgba(167, 139, 90, 0.45);
-  background: rgba(120, 83, 40, 0.28);
-  color: #fde68a;
-  border-radius: 999px;
-  padding: 0.3rem 0.75rem;
+  border: 1px solid rgba(248, 241, 227, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f8f1e3;
+  border-radius: 8px;
+  padding: 0.28rem 0.65rem;
   font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
 .branchButtonActive {
-  background: rgba(250, 204, 21, 0.22);
-  border-color: #facc15;
-  color: #fff7d6;
+  color: #1a1208;
+  background: #f6d48a;
+  border-color: #f6d48a;
+  box-shadow: 0 0 0 3px rgba(246, 212, 138, 0.22);
 }
 
 .leaves {
@@ -299,31 +322,34 @@
   height: 1.7rem;
   padding: 0 0.45rem;
   font-size: 0.75rem;
-  color: #ecfdf5;
+  font-weight: 700;
 }
 
 .leaf {
-  background: #166534;
-  border-radius: 0 70% 55% 70%;
+  color: #e7f6ff;
+  background: linear-gradient(180deg, rgba(20, 52, 78, 0.97), rgba(10, 28, 44, 0.97));
+  border: 1px solid rgba(125, 211, 252, 0.55);
+  border-radius: 5px 12px 12px 10px;
 }
 
 .fruit {
-  color: #431407;
-  font-weight: 700;
-  background: radial-gradient(circle at 35% 30%, #fde68a, #f59e0b 55%, #b45309);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px #14532d;
+  color: #e7fff8;
+  background: linear-gradient(180deg, rgba(14, 68, 58, 0.97), rgba(8, 32, 30, 0.97));
+  border: 1px solid rgba(94, 234, 212, 0.65);
+  border-radius: 12px 5px 10px 12px;
 }
 
 .topicPanel {
   margin-top: 0.8rem;
   padding-top: 0.7rem;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(246, 212, 138, 0.22);
 }
 
 .topicPanel h3 {
   margin: 0 0 0.45rem;
   font-size: 0.95rem;
+  color: #f6d48a;
+  letter-spacing: 0.04em;
 }
 
 .topicUtterances {
@@ -338,17 +364,19 @@
 .topicUtterance {
   padding: 0.55rem 0.65rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(248, 241, 227, 0.12);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .topicUtterance p {
   margin: 0.3rem 0 0;
   line-height: 1.45;
+  color: #f8f1e3;
 }
 
 .hint {
   margin: 0.6rem 0 0;
-  color: var(--muted);
+  color: rgba(248, 241, 227, 0.55);
   font-size: 0.86rem;
 }
 
@@ -360,13 +388,49 @@
   align-items: center;
 }
 
-.lobbyShell {
+.home {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+  border: 1px solid rgba(246, 212, 138, 0.4);
+  background: rgba(255, 244, 214, 0.06);
+  color: #f8f1e3;
+  border-radius: 999px;
+  min-height: 34px;
+  padding: 0.2rem 0.75rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.home:hover {
+  background: rgba(255, 244, 214, 0.12);
+}
+
+.chevron {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.lobbyShell,
+.resultShell {
+  color: #f8f1e3;
+  font-family: "Hiragino Maru Gothic ProN", "Yu Gothic", "Hiragino Sans", var(--font-geist-sans),
+    system-ui, sans-serif;
   background:
-    radial-gradient(900px 280px at 15% 0%, rgba(125, 211, 252, 0.22), transparent 60%),
-    linear-gradient(180deg, #0c4a6e 0%, #082f49 42%, #0b1220 100%);
-  border: 1px solid rgba(125, 211, 252, 0.28);
-  border-radius: 28px;
-  box-shadow: 0 24px 60px rgba(2, 12, 27, 0.35);
+    radial-gradient(900px 380px at 50% -12%, rgba(246, 212, 138, 0.18), transparent 58%),
+    radial-gradient(640px 480px at 0% 110%, rgba(56, 189, 248, 0.1), transparent 55%),
+    radial-gradient(640px 480px at 100% 110%, rgba(244, 114, 182, 0.12), transparent 55%),
+    linear-gradient(180deg, #1a102c 0%, #101a24 46%, #070d12 100%);
+  border: 1px solid rgba(246, 212, 138, 0.28);
+  border-radius: 22px;
+  box-shadow: 0 24px 60px rgba(2, 6, 16, 0.45);
 }
 
 .lobbyBar {
@@ -376,33 +440,39 @@
   align-items: flex-start;
   gap: 0.9rem;
   margin-bottom: 0.85rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(246, 212, 138, 0.28);
 }
 
 .lobbyHeading {
   min-width: 0;
+  flex: 1;
 }
 
 .lobbyKicker {
   margin: 0;
-  color: #fde68a;
-  font-size: 0.75rem;
+  color: #f6d48a;
+  font-size: 0.68rem;
   font-weight: 800;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
 }
 
 .lobbyTitle {
   margin: 0.1rem 0 0;
-  font-size: 1.7rem;
-  letter-spacing: 0.04em;
-  color: #f0f9ff;
+  font-size: 1.35rem;
+  line-height: 1.15;
+  letter-spacing: 0.08em;
+  color: #f8f1e3;
+  font-weight: 800;
 }
 
 .lobbyLead {
   margin: 0.35rem 0 0;
   max-width: 40rem;
-  color: #e0f2fe;
-  font-size: 0.92rem;
+  color: rgba(248, 241, 227, 0.72);
+  font-size: 0.9rem;
   line-height: 1.5;
+  font-weight: 650;
 }
 
 .lobby {
@@ -414,19 +484,19 @@
 }
 
 .lobbySea {
-  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 214, 0.04);
 }
 
 .lobbyCaption {
   margin: 0;
-  color: #f8fafc;
-  font-size: 1rem;
-  font-weight: 650;
+  color: #f8f1e3;
+  font-size: 0.98rem;
+  font-weight: 700;
 }
 
 .lobbyNote {
   margin: -0.35rem 0 0;
-  color: #bae6fd;
+  color: rgba(248, 241, 227, 0.55);
   font-size: 0.82rem;
   line-height: 1.45;
 }
@@ -436,20 +506,24 @@
   flex-direction: column;
   gap: 0.55rem;
   padding: 0.85rem;
-  border-radius: 18px;
-  background: rgba(8, 20, 36, 0.45);
-  border: 1px solid rgba(186, 230, 253, 0.18);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(28, 20, 12, 0.72), rgba(12, 10, 16, 0.72));
+  border: 1px solid rgba(246, 212, 138, 0.32);
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 214, 0.03);
 }
 
 .lobbyBlockHead h2 {
   margin: 0;
-  font-size: 1rem;
-  color: #fef9c3;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #f6d48a;
 }
 
 .lobbyBlockHead p {
-  margin: 0.2rem 0 0;
-  color: #cbd5e1;
+  margin: 0.25rem 0 0;
+  color: rgba(248, 241, 227, 0.62);
   font-size: 0.82rem;
   line-height: 1.4;
 }
@@ -470,19 +544,19 @@
   gap: 0.15rem;
   min-width: 8.5rem;
   padding: 0.7rem 0.85rem;
-  border-radius: 16px;
-  border: 1px solid rgba(125, 211, 252, 0.28);
-  background: rgba(15, 23, 42, 0.35);
-  color: #e0f2fe;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 241, 227, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f8f1e3;
   font: inherit;
   cursor: pointer;
 }
 
 .sessionChipOn {
-  background: linear-gradient(180deg, rgba(250, 204, 21, 0.28), rgba(14, 116, 144, 0.45));
-  border-color: #facc15;
-  color: #fffbeb;
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.25);
+  color: #1a1208;
+  background: #f6d48a;
+  border-color: #f6d48a;
+  box-shadow: 0 0 0 3px rgba(246, 212, 138, 0.22);
 }
 
 .sessionWhen {
@@ -492,7 +566,13 @@
 
 .sessionCount {
   font-size: 0.78rem;
-  color: #fde68a;
+  color: inherit;
+  opacity: 0.85;
+  font-weight: 700;
+}
+
+.sessionChipOn .sessionCount {
+  color: #5b3a08;
 }
 
 .cargoGrid {
@@ -511,35 +591,18 @@
   gap: 0.35rem;
   text-align: left;
   padding: 0.65rem 0.7rem 0.7rem;
-  border-radius: 14px 14px 10px 10px;
-  border: 1px solid rgba(217, 119, 6, 0.45);
-  background:
-    linear-gradient(#f8fafc, #f8fafc) padding-box,
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 10px,
-      rgba(146, 64, 14, 0.18) 10px,
-      rgba(146, 64, 14, 0.18) 12px
-    );
-  color: #1e293b;
+  border-radius: 10px;
+  border: 1px solid rgba(246, 212, 138, 0.28);
+  background: rgba(8, 6, 12, 0.55);
+  color: #f8f1e3;
   font: inherit;
   cursor: pointer;
-  box-shadow: inset 0 -8px 0 rgba(146, 64, 14, 0.18);
 }
 
 .cargoOn {
-  border-color: #facc15;
-  background:
-    linear-gradient(#fffbeb, #fef3c7) padding-box,
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 10px,
-      rgba(146, 64, 14, 0.22) 10px,
-      rgba(146, 64, 14, 0.22) 12px
-    );
-  box-shadow: inset 0 -8px 0 #f59e0b, 0 0 0 2px rgba(250, 204, 21, 0.45);
+  border-color: #f6d48a;
+  background: rgba(246, 212, 138, 0.12);
+  box-shadow: 0 0 0 2px rgba(246, 212, 138, 0.22);
 }
 
 .cargoTop {
@@ -552,20 +615,21 @@
 .cargoNote {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+  color: #f6d48a;
 }
 
 .cargoExcerpt {
   font-size: 0.78rem;
   line-height: 1.35;
-  color: #334155;
+  color: rgba(248, 241, 227, 0.78);
 }
 
 .cargo .selfTag {
-  color: #047857;
+  color: #5eead4;
 }
 
 .cargo .otherTag {
-  color: #475569;
+  color: #7dd3fc;
 }
 
 .emptyHarbor {
@@ -578,12 +642,14 @@
 
 .emptyHarbor h2 {
   margin: 0;
-  color: #fef9c3;
+  color: #f6d48a;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
 }
 
 .emptyHarbor p {
   margin: 0 0 0.4rem;
-  color: #e0f2fe;
+  color: rgba(248, 241, 227, 0.72);
 }
 
 .sailDock {
@@ -593,15 +659,15 @@
   gap: 0.8rem;
   flex-wrap: wrap;
   padding: 0.75rem;
-  border-radius: 20px;
-  background: rgba(2, 6, 23, 0.45);
-  border: 1px solid rgba(250, 204, 21, 0.35);
+  border-radius: 14px;
+  background: rgba(12, 8, 18, 0.55);
+  border: 1px solid rgba(246, 212, 138, 0.35);
 }
 
 .sailStatus {
   margin: 0;
-  color: #fef9c3;
-  font-weight: 650;
+  color: #f6d48a;
+  font-weight: 700;
 }
 
 .sailButton {
@@ -611,13 +677,13 @@
   align-items: center;
   justify-content: center;
   min-width: 11rem;
-  padding: 0.75rem 1.6rem 0.85rem;
+  padding: 0.7rem 1.4rem 0.8rem;
   border: 0;
-  border-radius: 18px;
+  border-radius: 999px;
   cursor: pointer;
-  color: #422006;
-  background: linear-gradient(180deg, #fde68a, #f59e0b);
-  box-shadow: 0 10px 24px rgba(245, 158, 11, 0.35);
+  color: #1a1208;
+  background: #f6d48a;
+  box-shadow: 0 3px 0 #a16207;
   font: inherit;
 }
 
@@ -628,51 +694,41 @@
 }
 
 .sailKicker {
-  font-size: 0.72rem;
-  font-weight: 750;
+  font-size: 0.68rem;
+  font-weight: 800;
   letter-spacing: 0.12em;
 }
 
 .sailButton span:last-child {
-  font-size: 1.45rem;
+  font-size: 1.25rem;
   font-weight: 850;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   line-height: 1.15;
 }
 
+/* 停泊船は静止（分析・準備の落ち着き） */
 .shipBob {
   transform-box: fill-box;
   transform-origin: center;
-  animation: gdShipBob 3.6s ease-in-out infinite;
-}
-
-@keyframes gdShipBob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .shipBob {
-    animation: none;
-  }
 }
 
 .liveJump {
   margin-left: auto;
   flex: none;
   appearance: none;
-  border: 1px solid rgba(253, 230, 138, 0.55);
-  background: rgba(253, 230, 138, 0.12);
-  color: #fde68a;
+  border: 1px solid rgba(246, 212, 138, 0.4);
+  background: rgba(255, 244, 214, 0.06);
+  color: #f8f1e3;
   border-radius: 999px;
-  min-height: 40px;
-  padding: 0.35rem 0.9rem;
+  min-height: 34px;
+  padding: 0.2rem 0.9rem;
   font: inherit;
+  font-size: 0.82rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
 
 .liveJump:hover {
-  background: rgba(253, 230, 138, 0.22);
+  background: rgba(255, 244, 214, 0.14);
 }

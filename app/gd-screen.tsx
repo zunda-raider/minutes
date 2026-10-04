@@ -149,24 +149,24 @@ function DockedVoyage({ crates }: { crates: number }) {
     >
       <defs>
         <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#7dd3fc" />
-          <stop offset="0.55" stopColor="#e0f2fe" />
-          <stop offset="1" stopColor="#fef3c7" />
+          <stop offset="0" stopColor="#1a102c" />
+          <stop offset="0.55" stopColor="#101a24" />
+          <stop offset="1" stopColor="#0a1218" />
         </linearGradient>
         <linearGradient id={seaId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#38bdf8" />
-          <stop offset="0.4" stopColor="#0284c7" />
-          <stop offset="1" stopColor="#082f49" />
+          <stop offset="0" stopColor="#143044" />
+          <stop offset="0.45" stopColor="#0c1a28" />
+          <stop offset="1" stopColor="#070d12" />
         </linearGradient>
         <linearGradient id={woodId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#d6a36a" />
-          <stop offset="1" stopColor="#92400e" />
+          <stop offset="0" stopColor="#c9a06a" />
+          <stop offset="1" stopColor="#7a4e1e" />
         </linearGradient>
       </defs>
       <rect width="960" height="280" fill={`url(#${skyId})`} />
-      <circle cx="820" cy="48" r="26" fill="#fde68a" opacity="0.35" />
-      <circle cx="820" cy="48" r="16" fill="#facc15" />
-      <g fill="#ffffff" opacity="0.9">
+      <circle cx="820" cy="48" r="26" fill="#f6d48a" opacity="0.22" />
+      <circle cx="820" cy="48" r="16" fill="#f6d48a" opacity="0.85" />
+      <g fill="#f8f1e3" opacity="0.18">
         <ellipse cx="180" cy="42" rx="26" ry="11" />
         <ellipse cx="204" cy="38" rx="18" ry="12" />
         <ellipse cx="160" cy="40" rx="14" ry="9" />
@@ -177,7 +177,7 @@ function DockedVoyage({ crates }: { crates: number }) {
       <g className={gd.waveDrift} fill="none">
         <path
           d="M-320 150 Q-240 136 -160 150 T0 150 T160 150 T320 150 T480 150 T640 150 T800 150 T960 150 T1120 150 T1280 150"
-          stroke="rgba(255,255,255,0.28)"
+          stroke="rgba(246,212,138,0.28)"
           strokeWidth="2"
         />
         <path
@@ -188,16 +188,16 @@ function DockedVoyage({ crates }: { crates: number }) {
       <path
         d="M250 168 C 390 168, 520 150, 760 156"
         fill="none"
-        stroke="rgba(255,255,255,0.8)"
+        stroke="rgba(246,212,138,0.7)"
         strokeDasharray="8 9"
         strokeLinecap="round"
         strokeWidth="2.4"
       />
-      <g opacity="0.5">
-        <ellipse cx="860" cy="176" rx="52" ry="10" fill="#fde68a" />
-        <path d="M826 166 Q852 142 888 162 Q908 148 920 168 Q892 160 860 166 Q838 172 826 166 Z" fill="#16a34a" />
-        <rect x="838" y="148" width="36" height="16" rx="4" fill="#fffbeb" stroke="#78350f" strokeWidth="1" />
-        <text x="856" y="160" textAnchor="middle" fill="#78350f" fontSize="9" fontWeight="700">
+      <g opacity="0.72">
+        <ellipse cx="860" cy="176" rx="52" ry="10" fill="#f6d48a" opacity="0.35" />
+        <path d="M826 166 Q852 142 888 162 Q908 148 920 168 Q892 160 860 166 Q838 172 826 166 Z" fill="#14532d" />
+        <rect x="838" y="148" width="36" height="16" rx="4" fill="#1a1208" stroke="#f6d48a" strokeWidth="1" />
+        <text x="856" y="160" textAnchor="middle" fill="#f6d48a" fontSize="9" fontWeight="700">
           島
         </text>
       </g>
@@ -205,29 +205,29 @@ function DockedVoyage({ crates }: { crates: number }) {
         <rect x="28" y="150" width="168" height="16" rx="3" fill={`url(#${woodId})`} />
         <rect x="40" y="166" width="10" height="46" rx="2" fill="#78350f" />
         <rect x="168" y="166" width="10" height="46" rx="2" fill="#78350f" />
-        <path d="M186 158 C 210 150, 214 142, 228 146" fill="none" stroke="#fef3c7" strokeWidth="1.6" />
+        <path d="M186 158 C 210 150, 214 142, 228 146" fill="none" stroke="#f6d48a" strokeWidth="1.6" opacity="0.7" />
       </g>
       {Array.from({ length: shown }, (_, i) => (
         <g key={i} transform={`translate(${46 + i * 28} 128)`}>
-          <rect width="22" height="18" rx="3" fill="#fde68a" stroke="#92400e" strokeWidth="1.2" />
-          <path d="M0 6 H22" stroke="#92400e" strokeWidth="1" />
+          <rect width="22" height="18" rx="3" fill="#f6d48a" stroke="#a16207" strokeWidth="1.2" />
+          <path d="M0 6 H22" stroke="#a16207" strokeWidth="1" />
         </g>
       ))}
       <g className={gd.shipBob}>
-        <path d="M214 156 Q250 168 292 154" fill="none" stroke="rgba(255,255,255,0.65)" strokeWidth="1.5" />
-        <path d="M230 150 L292 144 L278 164 L222 164 Z" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.2" />
+        <path d="M214 156 Q250 168 292 154" fill="none" stroke="rgba(246,212,138,0.45)" strokeWidth="1.5" />
+        <path d="M230 150 L292 144 L278 164 L222 164 Z" fill="#f8f1e3" stroke="#1a1208" strokeWidth="1.2" />
         <path d="M248 150 L256 142 L266 150 Z" fill="#fb7185" />
-        <path d="M258 148 L258 112" stroke="#1e293b" strokeWidth="2" strokeLinecap="round" />
-        <path d="M259 116 L259 146 L286 132 Z" fill="#fff7ed" stroke="#9a3412" strokeWidth="0.9" />
+        <path d="M258 148 L258 112" stroke="#f8f1e3" strokeWidth="2" strokeLinecap="round" />
+        <path d="M259 116 L259 146 L286 132 Z" fill="#fff8ea" stroke="#a16207" strokeWidth="0.9" />
         <path d="M259 116 L276 124 L259 132 Z" fill="#e11d48" />
       </g>
       <text
         x="78"
         y="108"
-        fill="#0f172a"
+        fill="#f6d48a"
         fontSize="14"
         fontWeight="700"
-        stroke="#f8fafc"
+        stroke="#0a1018"
         strokeWidth="4"
         paintOrder="stroke"
         strokeLinejoin="round"
@@ -303,29 +303,29 @@ function Voyage({
     >
       <defs>
         <linearGradient id={skyId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#7dd3fc" />
-          <stop offset="0.55" stopColor="#e0f2fe" />
-          <stop offset="1" stopColor="#fef3c7" />
+          <stop offset="0" stopColor="#1a102c" />
+          <stop offset="0.55" stopColor="#101a24" />
+          <stop offset="1" stopColor="#0a1218" />
         </linearGradient>
         <linearGradient id={seaId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#38bdf8" />
-          <stop offset="0.35" stopColor="#0284c7" />
-          <stop offset="0.72" stopColor="#075985" />
-          <stop offset="1" stopColor="#082f49" />
+          <stop offset="0" stopColor="#143044" />
+          <stop offset="0.35" stopColor="#0f2434" />
+          <stop offset="0.72" stopColor="#0a1520" />
+          <stop offset="1" stopColor="#070d12" />
         </linearGradient>
         <linearGradient id={sandId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#fde68a" />
-          <stop offset="1" stopColor="#f6d7a7" />
+          <stop offset="0" stopColor="#f6d48a" />
+          <stop offset="1" stopColor="#c9a06a" />
         </linearGradient>
         <filter id={softId} x="-30%" y="-30%" width="160%" height="160%">
-          <feDropShadow dx="0" dy="1.2" stdDeviation="1.4" floodColor="#0f172a" floodOpacity="0.35" />
+          <feDropShadow dx="0" dy="1.2" stdDeviation="1.4" floodColor="#070d12" floodOpacity="0.45" />
         </filter>
       </defs>
 
       <rect width="960" height="360" fill={`url(#${skyId})`} />
-      <circle cx="118" cy="52" r="34" fill="#fde68a" opacity="0.35" />
-      <circle cx="118" cy="52" r="20" fill="#facc15" />
-      <g fill="#ffffff" opacity="0.9">
+      <circle cx="118" cy="52" r="34" fill="#f6d48a" opacity="0.2" />
+      <circle cx="118" cy="52" r="20" fill="#f6d48a" opacity="0.85" />
+      <g fill="#f8f1e3" opacity="0.16">
         <ellipse cx="250" cy="48" rx="28" ry="12" />
         <ellipse cx="274" cy="44" rx="20" ry="14" />
         <ellipse cx="228" cy="46" rx="16" ry="10" />
@@ -333,7 +333,7 @@ function Voyage({
         <ellipse cx="650" cy="32" rx="22" ry="14" />
         <ellipse cx="592" cy="34" rx="18" ry="11" />
       </g>
-      <g fill="none" stroke="#0f172a" strokeWidth="1.4" strokeLinecap="round" opacity="0.45">
+      <g fill="none" stroke="#f6d48a" strokeWidth="1.4" strokeLinecap="round" opacity="0.35">
         <path d="M400 58 l8 6 l8 -6" />
         <path d="M438 44 l7 5 l7 -5" />
       </g>
@@ -342,7 +342,7 @@ function Voyage({
       <g className={gd.waveDrift} fill="none">
         <path
           d="M-320 168 Q-240 150 -160 168 T0 168 T160 168 T320 168 T480 168 T640 168 T800 168 T960 168 T1120 168 T1280 168"
-          stroke="rgba(255,255,255,0.28)"
+          stroke="rgba(246,212,138,0.28)"
           strokeWidth="2"
         />
         <path
@@ -351,7 +351,7 @@ function Voyage({
         />
         <path
           d="M-320 286 Q-240 270 -160 286 T0 286 T160 286 T320 286 T480 286 T640 286 T800 286 T960 286 T1120 286 T1280 286"
-          stroke="rgba(224,242,254,0.45)"
+          stroke="rgba(125,211,252,0.28)"
           strokeWidth="2"
         />
         <path
@@ -365,47 +365,47 @@ function Voyage({
         y1={Y0}
         x2="860"
         y2={Y0}
-        stroke="rgba(255,255,255,0.72)"
+        stroke="rgba(246,212,138,0.7)"
         strokeDasharray="7 8"
         strokeLinecap="round"
       />
       {markers.length > 0 && (
         <>
-          <path d={sailed} fill="none" stroke="rgba(15,23,42,0.35)" strokeWidth="7" strokeLinejoin="round" strokeLinecap="round" />
-          <path d={sailed} fill="none" stroke="#f8fafc" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={sailed} fill="none" stroke="rgba(7,13,18,0.55)" strokeWidth="7" strokeLinejoin="round" strokeLinecap="round" />
+          <path d={sailed} fill="none" stroke="#f8f1e3" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
         </>
       )}
 
       <g filter={`url(#${softId})`}>
-        <ellipse cx="878" cy="236" rx="78" ry="18" fill="#c2410c" opacity="0.25" />
+        <ellipse cx="878" cy="236" rx="78" ry="18" fill="#f6d48a" opacity="0.18" />
         <ellipse cx="878" cy="228" rx="74" ry="16" fill={`url(#${sandId})`} />
-        <path d="M824 214 Q858 176 902 208 Q934 186 952 220 Q918 208 878 216 Q846 222 824 214 Z" fill="#16a34a" />
-        <path d="M846 218 Q872 192 904 214 Q880 206 858 216 Z" fill="#4ade80" />
-        <path d="M812 228 H846" stroke="#d6d3d1" strokeWidth="4" strokeLinecap="round" />
-        <path d="M908 216 C918 192 898 168 916 146" fill="none" stroke="#92400e" strokeWidth="4" strokeLinecap="round" />
-        <g fill="none" stroke="#15803d" strokeWidth="2.6" strokeLinecap="round">
+        <path d="M824 214 Q858 176 902 208 Q934 186 952 220 Q918 208 878 216 Q846 222 824 214 Z" fill="#14532d" />
+        <path d="M846 218 Q872 192 904 214 Q880 206 858 216 Z" fill="#166534" />
+        <path d="M812 228 H846" stroke="#f8f1e3" strokeWidth="4" strokeLinecap="round" opacity="0.55" />
+        <path d="M908 216 C918 192 898 168 916 146" fill="none" stroke="#a16207" strokeWidth="4" strokeLinecap="round" />
+        <g fill="none" stroke="#5eead4" strokeWidth="2.6" strokeLinecap="round" opacity="0.75">
           <path d="M916 148 C900 132 882 146 874 134" />
           <path d="M916 148 C932 128 954 138 958 122" />
           <path d="M916 148 C936 150 952 166 944 178" />
           <path d="M916 148 C898 160 884 150 874 164" />
         </g>
-        <path d="M846 226 V168" stroke="#78350f" strokeWidth="3" strokeLinecap="round" />
-        <rect x="812" y="150" width="70" height="28" rx="6" fill="#fffbeb" stroke="#78350f" strokeWidth="1.6" />
-        <text x="847" y="170" textAnchor="middle" fill="#78350f" fontSize="15" fontWeight="700">
+        <path d="M846 226 V168" stroke="#f6d48a" strokeWidth="3" strokeLinecap="round" />
+        <rect x="812" y="150" width="70" height="28" rx="6" fill="#1a1208" stroke="#f6d48a" strokeWidth="1.6" />
+        <text x="847" y="170" textAnchor="middle" fill="#f6d48a" fontSize="15" fontWeight="700">
           結論
         </text>
       </g>
 
       <g>
-        <circle cx={X0} cy={Y0} r="9" fill="#f8fafc" stroke="#0369a1" strokeWidth="3" />
-        <circle cx={X0} cy={Y0} r="3" fill="#0369a1" />
+        <circle cx={X0} cy={Y0} r="9" fill="#f8f1e3" stroke="#f6d48a" strokeWidth="3" />
+        <circle cx={X0} cy={Y0} r="3" fill="#f6d48a" />
         <text
           x="36"
           y="188"
-          fill="#0f172a"
+          fill="#f6d48a"
           fontSize="14"
           fontWeight="700"
-          stroke="#f8fafc"
+          stroke="#0a1018"
           strokeWidth="4"
           paintOrder="stroke"
           strokeLinejoin="round"
@@ -482,10 +482,10 @@ function Voyage({
                 x={noteX}
                 y={noteY}
                 textAnchor={noteAnchor}
-                fill="#f8fafc"
+                fill="#f8f1e3"
                 fontSize="11"
                 fontWeight="700"
-                stroke="#0f172a"
+                stroke="#0a1018"
                 strokeWidth="3.5"
                 paintOrder="stroke"
                 strokeLinejoin="round"
@@ -498,11 +498,11 @@ function Voyage({
       })}
 
       <g transform={`translate(${ship.x} ${ship.y - 16})`} filter={`url(#${softId})`} aria-hidden="true">
-        <path d="M-26 8 Q-10 14 2 8 Q14 16 28 6" fill="none" stroke="rgba(255,255,255,0.7)" strokeWidth="1.6" />
-        <path d="M-18 4 L22 0 L14 12 L-12 12 Z" fill="#f8fafc" stroke="#0f172a" strokeWidth="1.1" />
+        <path d="M-26 8 Q-10 14 2 8 Q14 16 28 6" fill="none" stroke="rgba(246,212,138,0.45)" strokeWidth="1.6" />
+        <path d="M-18 4 L22 0 L14 12 L-12 12 Z" fill="#f8f1e3" stroke="#1a1208" strokeWidth="1.1" />
         <path d="M-4 4 L2 -2 L8 4 Z" fill="#fb7185" />
-        <path d="M2 2 L2 -20" stroke="#1e293b" strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M3 -18 L3 0 L20 -7 Z" fill="#fff7ed" stroke="#9a3412" strokeWidth="0.9" />
+        <path d="M2 2 L2 -20" stroke="#f8f1e3" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M3 -18 L3 0 L20 -7 Z" fill="#fff8ea" stroke="#a16207" strokeWidth="0.9" />
         <path d="M3 -18 L14 -13 L3 -9 Z" fill="#e11d48" />
       </g>
     </svg>
@@ -723,16 +723,16 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
 
   if (result) {
     return (
-      <div className={`${styles.app} ${styles.appGd}`}>
-        <div className={styles.bgGlow} aria-hidden="true" />
-        <header className={styles.noteTopBar}>
-          <button type="button" className={styles.backButton} onClick={onBack}>
-            <span className={styles.backChevron} aria-hidden="true" />
+      <div className={`${styles.app} ${styles.appGd} ${gd.resultShell}`}>
+        <header className={gd.lobbyBar}>
+          <button type="button" className={gd.home} onClick={onBack}>
+            <span className={gd.chevron} aria-hidden="true" />
             Home
           </button>
-          <div className={styles.noteHeading}>
-            <h1 className={styles.title}>GD議事録</h1>
-            <p className={styles.subtitle}>グループディスカッション</p>
+          <div className={gd.lobbyHeading}>
+            <p className={gd.lobbyKicker}>GDモード</p>
+            <h1 className={gd.lobbyTitle}>分析結果</h1>
+            <p className={gd.lobbyLead}>航海図と論点の木。ライブ盤と同じ海の色で、静かに読みます。</p>
           </div>
         </header>
         <div className={gd.stack}>
@@ -858,8 +858,8 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   return (
     <div className={`${styles.app} ${styles.appGd} ${gd.lobbyShell}`}>
       <header className={gd.lobbyBar}>
-        <button type="button" className={styles.backButton} onClick={onBack}>
-          <span className={styles.backChevron} aria-hidden="true" />
+        <button type="button" className={gd.home} onClick={onBack}>
+          <span className={gd.chevron} aria-hidden="true" />
           Home
         </button>
         <div className={gd.lobbyHeading}>
