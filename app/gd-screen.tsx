@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './page.module.css';
 import gd from './gd.module.css';
 import { GdLive, type GdLiveEnd } from './gd-live';
@@ -101,8 +101,10 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState('');
-  const [deck, setDeck] = useState<'live' | 'harbor' | 'score'>('live');
+  const [deck, setDeck] = useState<'live' | 'harbor' | 'voyage' | 'score'>('live');
   const [scoreSession, setScoreSession] = useState<GdLiveEnd | null>(null);
+  const [shownScore, setShownScore] = useState<GdLiveEnd | null>(null);
+  const scoreRef = useRef<GdLiveEnd | null>(null);
 
   const sessions = useMemo(() => groupSessions(ordered), [ordered]);
   const activeSession =
@@ -137,17 +139,45 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
   }
 
 
-  if (deck === 'score' && scoreSession) {
+  if (deck === 'score' && shownScore) {
     return (
       <GdResult
-        goal={scoreSession.goal}
-        transcript={scoreSession.transcript}
+        goal={shownScore.goal}
+        transcript={shownScore.transcript}
         genre={genre}
-        selfCount={scoreSession.selfCount}
-        lineCount={scoreSession.lineCount}
+        selfCount={shownScore.selfCount}
+        lineCount={shownScore.lineCount}
         onBack={onBack}
         onLive={() => setDeck('live')}
       />
+    );
+  }
+
+  if (deck === 'voyage') {
+    return (
+      <div className={`${styles.app} ${gd.scoreStage}`}>
+        <header className={gd.scoreHud}>
+          <button type="button" className={gd.scoreHome} onClick={onBack}>
+            <span className={gd.scoreChevron} aria-hidden="true" />
+            Home
+          </button>
+          <div>
+            <p className={gd.scoreKicker}>GDモード</p>
+            <h1 className={gd.scoreTitle}>航海</h1>
+          </div>
+          <StopShareButton />
+          <button type="button" className={gd.scoreLive} onClick={() => setDeck('live')}>
+            ライブ
+          </button>
+        </header>
+        <div className={gd.scoreBody}>
+          <section className={gd.scoreRoot} aria-label="航海">
+            <p className={gd.scoreRole}>案内</p>
+            <p className={gd.scoreSummary}>航海の図はいま出していません。</p>
+            <p className={gd.scoreMuted}>ライブのボードに戻れます。</p>
+          </section>
+        </div>
+      </div>
     );
   }
 
@@ -156,9 +186,21 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
       <GdLive
         onBack={onBack}
         onHarbor={() => setDeck('harbor')}
-        onSessionEnd={(session) => {
-          setScoreSession(session);
+        onVoyage={() => setDeck('voyage')}
+        resultReady={scoreSession != null}
+        onResult={() => {
+          const session = scoreRef.current;
+          if (!session) return;
+          setShownScore(session);
           setDeck('score');
+        }}
+        onSessionStart={() => {
+          scoreRef.current = null;
+          setScoreSession(null);
+        }}
+        onSessionEnd={(session) => {
+          scoreRef.current = session;
+          setScoreSession(session);
         }}
       />
     );
@@ -196,7 +238,7 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
             : '記録を探しています…'}
         </p>
         <p className={gd.lobbyNote}>
-          ライブを終了すると、自分の5軸評価へ進みます。この画面では評価しません。
+          ライブを終了したあと、リザルトから自分の5軸評価へ進みます。この画面では評価しません。
         </p>
 
         {historyReady && ordered.length === 0 ? (

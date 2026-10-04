@@ -55,6 +55,11 @@ function storedDurationMs(): number {
 type Props = {
   onBack: () => void;
   onHarbor: () => void;
+  onVoyage: () => void;
+  onResult: () => void;
+  /** True when a finished session can still be opened, even after this board remounts. */
+  resultReady: boolean;
+  onSessionStart: () => void;
   onSessionEnd: (session: GdLiveEnd) => void;
 };
 
@@ -180,7 +185,7 @@ function captureErrorMessage(err: unknown): string {
   return `アプリ / システム音声を取得できませんでした。${SYSTEM_AUDIO_HELP}`;
 }
 
-export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
+export function GdLive({ onBack, onHarbor, onVoyage, onResult, resultReady, onSessionStart, onSessionEnd }: Props) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [durationMs, setDurationMs] = useState(GD_LIVE_DURATION_MS);
@@ -219,6 +224,7 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
   const utterancesRef = useRef<BoardLine[]>([]);
   const goalRef = useRef('');
   const onSessionEndRef = useRef(onSessionEnd);
+  const onSessionStartRef = useRef(onSessionStart);
   const endSessionRef = useRef<() => void>(() => {});
   const flushRef = useRef<Promise<void>>(Promise.resolve());
   const resolveFlushRef = useRef<(() => void) | null>(null);
@@ -229,6 +235,7 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
   modelKeyRef.current = modelKey;
   goalRef.current = goal;
   onSessionEndRef.current = onSessionEnd;
+  onSessionStartRef.current = onSessionStart;
   durationRef.current = durationMs;
 
   useEffect(() => {
@@ -351,6 +358,7 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
     elapsedRef.current = 0;
     setElapsedMs(0);
     scrollerRef.current?.scrollTo(0, 0);
+    onSessionStartRef.current();
     setPhase('live');
   }
 
@@ -571,11 +579,19 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
       resolveFlushRef.current = null;
     }
     setPhase('ended');
-    setNotice((prev) => prev || '終了しました。残りの文字起こしのあと、自分の評価に進みます。');
+    const publish = () => {
+      const lines = utterancesRef.current;
+      onSessionEndRef.current({
+        goal: goalRef.current,
+        transcript: formatGdTranscript(lines),
+        lineCount: lines.length,
+        selfCount: lines.filter((line) => line.speaker === '自分').length,
+      });
+    };
+    publish();
     if (publishedRef.current) return;
     publishedRef.current = true;
     const gen = sessionGenRef.current;
-    const goalNow = goalRef.current;
     void (async () => {
       const capWait = new Promise<void>((resolve) => {
         window.setTimeout(resolve, 8000);
@@ -587,13 +603,7 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
         /* publish what has already landed */
       }
       if (!aliveRef.current || gen !== sessionGenRef.current) return;
-      const lines = utterancesRef.current;
-      onSessionEndRef.current({
-        goal: goalNow,
-        transcript: formatGdTranscript(lines),
-        lineCount: lines.length,
-        selfCount: lines.filter((line) => line.speaker === '自分').length,
-      });
+      publish();
     })();
   };
 
@@ -664,8 +674,8 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
     .join('\n')
     .slice(-4000);
   const phaseLabel = phase === 'live' ? '議論中' : phase === 'ended' ? '終了' : '待機';
-  const statusText =
-    notice || (pending > 0 ? `文字起こし中 ${pending}件` : '') || micWarn;
+  const statusText = notice || micWarn;
+  const canOpenResult = phase === 'ended' || resultReady;
 
   const idleHint =
     '開始すると、画面共有でZoomなどの音声を取ります。Whisperの区間が、左は他者・右は自分で載ります。無言は空白のまま残り、自分の長い無言だけ、すこしずつ色が濃くなります。';
@@ -735,6 +745,9 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
             />
             <span>分</span>
           </label>
+          <button type="button" className={styles.harbor} onClick={onHarbor}>
+            出航準備
+          </button>
           <div className={styles.transport}>
             <button
               type="button"
@@ -747,10 +760,21 @@ export function GdLive({ onBack, onHarbor, onSessionEnd }: Props) {
             <button type="button" className={styles.stop} onClick={stop} disabled={!running}>
               終了
             </button>
+            <button
+              type="button"
+              className={styles.navBtn}
+              onClick={onResult}
+              disabled={!canOpenResult}
+            >
+              リザルト
+            </button>
+            <button type="button" className={styles.navBtn} onClick={onVoyage}>
+              航海
+            </button>
           </div>
-          <button type="button" className={styles.harbor} onClick={onHarbor}>
-            出航準備
-          </button>
+          <p className={styles.pending} role="status" aria-live="polite">
+            {pending > 0 ? `文字起こし中 ${pending}件` : ''}
+          </p>
         </div>
 
         <label className={styles.goal}>
