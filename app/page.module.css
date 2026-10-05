@@ -483,21 +483,41 @@
     0 14px 32px rgba(0, 0, 0, 0.28);
 }
 
-/* Speaker A / 自分 vs everyone else — color only, no text label on the card */
+/* Speaker tones: 自分 (gold) / セミナー (copper) / それ以外 (stone) / A–G letter */
 .entrySelf {
-  border-color: rgba(246, 212, 138, 0.42);
-  background: linear-gradient(180deg, rgba(246, 212, 138, 0.14), rgba(246, 212, 138, 0.04));
+  border-color: rgba(255, 231, 168, 0.72);
+  background: linear-gradient(180deg, rgba(255, 231, 168, 0.2), rgba(246, 212, 138, 0.05));
   box-shadow:
-    inset 3px 0 0 #f6d48a,
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 14px 32px rgba(0, 0, 0, 0.28);
+    inset 4px 0 0 #ffe7a8,
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 32px rgba(0, 0, 0, 0.28),
+    0 0 18px rgba(246, 212, 138, 0.12);
+}
+
+.entrySeminar {
+  border-color: rgba(224, 122, 47, 0.72);
+  background: linear-gradient(180deg, rgba(224, 122, 47, 0.2), rgba(20, 12, 8, 0.2));
+  box-shadow:
+    inset 4px 0 0 #e07a2f,
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 14px 32px rgba(0, 0, 0, 0.28),
+    0 0 16px rgba(224, 122, 47, 0.14);
 }
 
 .entryOther {
-  border-color: rgba(168, 140, 96, 0.32);
-  background: linear-gradient(180deg, rgba(90, 72, 48, 0.18), rgba(0, 0, 0, 0.14));
+  border-color: rgba(168, 148, 112, 0.55);
+  background: linear-gradient(180deg, rgba(90, 72, 48, 0.28), rgba(0, 0, 0, 0.16));
   box-shadow:
-    inset 3px 0 0 #8a7560,
+    inset 4px 0 0 #a89878,
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 14px 32px rgba(0, 0, 0, 0.28);
+}
+
+.entryLetter {
+  border-color: rgba(246, 212, 138, 0.28);
+  background: linear-gradient(180deg, rgba(246, 212, 138, 0.08), rgba(16, 14, 11, 0.5));
+  box-shadow:
+    inset 4px 0 0 #c9a45a,
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     0 14px 32px rgba(0, 0, 0, 0.28);
 }
@@ -551,11 +571,73 @@
   min-width: 0;
 }
 
-/* Quiet speaker word beside #N — same meta size, not a chip or body tag */
+/* At-a-glance speaker chip: strong contrast on black×gold cards */
 .entrySpeakerQuiet {
   color: var(--muted);
   font-weight: 500;
   letter-spacing: 0.01em;
+}
+
+.entrySpeakerBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.55rem;
+  padding: 0.12rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.entrySpeakerBadgeSelf {
+  border-color: #ffe7a8;
+  background: #ffe7a8;
+  color: #1a1208;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 10px rgba(255, 231, 168, 0.35);
+}
+
+.entrySpeakerBadgeSeminar {
+  border-color: #e07a2f;
+  background: #e07a2f;
+  color: #1a0c04;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 0 10px rgba(224, 122, 47, 0.35);
+}
+
+.entrySpeakerBadgeOther {
+  border-color: #a89878;
+  background: #3a342c;
+  color: #f8f1e3;
+}
+
+.entrySpeakerBadgeLetter {
+  border-color: rgba(246, 212, 138, 0.55);
+  background: rgba(246, 212, 138, 0.14);
+  color: #ffe7a8;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  letter-spacing: 0.08em;
+}
+
+.entrySpeakerBadgeQuestioner {
+  border-color: rgba(246, 212, 138, 0.4);
+  background: rgba(90, 72, 48, 0.55);
+  color: #f5e6c8;
+}
+
+.entryTranslatingHint {
+  margin-left: 0.25rem;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .entryMeta {
@@ -625,21 +707,214 @@
 }
 
 .translationBlock {
-  margin-top: 0.7rem;
+  margin-top: 0.75rem;
+  padding: 0.55rem 0.6rem 0.65rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(246, 212, 138, 0.32);
+  background:
+    linear-gradient(165deg, rgba(246, 212, 138, 0.12), transparent 55%),
+    rgba(16, 14, 11, 0.85);
+  cursor: pointer;
+}
+
+.translationBlock:hover {
+  border-color: rgba(255, 231, 168, 0.55);
+  box-shadow: 0 0 14px rgba(246, 212, 138, 0.12);
 }
 
 .translationLabel {
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ok);
-  margin-bottom: 0.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #ffe7a8;
+  margin-bottom: 0.4rem;
+}
+
+.translationLabelHint {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
 }
 
 .transcriptJa {
-  background: rgba(246, 212, 138, 0.07);
+  background: rgba(3, 6, 12, 0.35);
+  border: 1px solid rgba(246, 212, 138, 0.18);
+}
+
+/* Ollama post-translation modal — status + result hard to miss */
+.translateModalRoot {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.translateModalBackdrop {
+  appearance: none;
+  border: none;
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  cursor: pointer;
+}
+
+.translateModal {
+  position: relative;
+  z-index: 1;
+  width: min(34rem, 100%);
+  max-height: min(78vh, 36rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.1rem 1.15rem 1.15rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(246, 212, 138, 0.42);
+  background:
+    linear-gradient(165deg, rgba(246, 212, 138, 0.14), transparent 48%),
+    #100e0b;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 24px 56px rgba(0, 0, 0, 0.55);
+}
+
+.translateModalHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.translateModalTitle {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #ffe7a8;
+}
+
+.translateModalStatus {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.translateModalStatusRunning {
+  color: #ffe7a8;
+}
+
+.translateModalStatusDone {
+  color: #f6d48a;
+}
+
+.translateModalStatusError {
+  color: #ff6b8a;
+}
+
+.translateModalClose {
+  appearance: none;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 107, 138, 0.42);
+  background: linear-gradient(180deg, rgba(255, 107, 138, 0.22), rgba(255, 107, 138, 0.1));
+  color: #fecdd3;
+  font-size: 1.35rem;
+  line-height: 1;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.translateModalClose:hover {
+  background: rgba(255, 92, 122, 0.18);
+}
+
+.translateModalClose:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.translateProgressTrack {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(246, 212, 138, 0.18);
+  overflow: hidden;
+}
+
+.translateProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #c9a45a, #ffe7a8);
+  box-shadow: 0 0 12px rgba(246, 212, 138, 0.35);
+  transition: width 0.2s ease;
+}
+
+.translateModalBody {
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.translateResultCard {
+  padding: 0.65rem 0.7rem;
+  border-radius: var(--radius-sm);
   border: 1px solid rgba(246, 212, 138, 0.22);
+  background: rgba(3, 6, 12, 0.42);
+}
+
+.translateResultMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.translateResultJa {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.translateResultEn {
+  margin: 0.4rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.translateModalEmpty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.translateModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 760px) {

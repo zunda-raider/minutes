@@ -88,3 +88,26 @@ export function quietSpeakerTag(
   if (speakerId > MAX_SPEAKERS) return null;
   return letterForSpeakerId(speakerId);
 }
+
+export type CardSpeakerTone = 'self' | 'seminar' | 'other' | 'letter' | 'questioner';
+
+/**
+ * Card color + chip text for at-a-glance who.
+ * 自分 / セミナー / それ以外 / 質問者, and D–G as 発言者X. null = unset.
+ */
+export function cardSpeakerBadge(
+  speakerId: number | undefined | null,
+  source?: RecordingSource | null
+): { tone: CardSpeakerTone; label: string } | null {
+  const tag = quietSpeakerTag(speakerId, source);
+  if (!tag || speakerId == null) return null;
+  if (source === 'mic') {
+    return speakerId === 1
+      ? { tone: 'self', label: '自分' }
+      : { tone: 'questioner', label: '質問者' };
+  }
+  if (speakerId === 1) return { tone: 'self', label: '自分' };
+  if (speakerId === 2) return { tone: 'seminar', label: 'セミナー' };
+  if (speakerId === 3) return { tone: 'other', label: 'それ以外' };
+  return { tone: 'letter', label: `発言者${tag}` };
+}

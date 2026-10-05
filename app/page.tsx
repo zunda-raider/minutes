@@ -25,7 +25,8 @@ import { remapSpeakersContinuity, type DiarizeTurn } from '@/lib/diarize-parse';
 import {
   letterForSpeakerId,
   ASSIGN_BUCKETS,
-  quietSpeakerTag,
+  cardSpeakerBadge,
+  type CardSpeakerTone,
   SPEAKER_LETTERS,
   ZOOM_CATEGORIES,
   zoomCategoryForSpeaker,
@@ -107,6 +108,23 @@ type TranscriptEntry = {
 
 
 type Screen = 'home' | 'note1' | 'note2' | 'gd';
+
+type TranslateResultItem = {
+  id: string;
+  note: number;
+  text: string;
+  textJa: string;
+};
+
+/** Ollama 後翻訳の進行 / 結果ポップアップ */
+type TranslateModalState = {
+  phase: 'running' | 'done' | 'error' | 'view';
+  total: number;
+  finished: number;
+  currentNote?: number;
+  items: TranslateResultItem[];
+  errors: string[];
+};
 type AudioSource = 'mic' | 'system';
 
 /** Minutes / Home: Zoom and mic both rotate about once a minute.
@@ -126,6 +144,22 @@ function formatTime(iso: string): string {
     return iso;
   }
 }
+
+const CARD_TONE_CLASS: Record<CardSpeakerTone, string> = {
+  self: styles.entrySelf,
+  seminar: styles.entrySeminar,
+  other: styles.entryOther,
+  letter: styles.entryLetter,
+  questioner: styles.entryOther,
+};
+
+const BADGE_TONE_CLASS: Record<CardSpeakerTone, string> = {
+  self: styles.entrySpeakerBadgeSelf,
+  seminar: styles.entrySpeakerBadgeSeminar,
+  other: styles.entrySpeakerBadgeOther,
+  letter: styles.entrySpeakerBadgeLetter,
+  questioner: styles.entrySpeakerBadgeQuestioner,
+};
 
 function isEnglishEntry(entry: TranscriptEntry): boolean {
   return entry.lang === 'en' || entry.lang.startsWith('en-');
@@ -237,6 +271,7 @@ export default function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyHint, setCopyHint] = useState('');
   const [translatingIds, setTranslatingIds] = useState<Set<string>>(new Set());
+  const [translateModal, setTranslateModal] = useState<TranslateModalState | null>(null);
   const [langs, setLangs] = useState<LangOption[]>([
     { code: 'ja', label: '日本語' },
     { code: 'en', label: 'English' },
@@ -1558,8 +1593,11 @@ export default function Home() {
     </section>
   );
 
-  const translateEntry = async (entry: TranscriptEntry) => {
-    if (wantRecordingRef.current || !isEnglishEntry(entry) || entry.textJa) return;
+  /** Returns { textJa } on success, { error } on failure, null when skipped. */
+  const translateEntry = async (
+    entry: TranscriptEntry
+  ): Promise<{ textJa: string } | { error: string } | null> => {
+    if (wantRecordingRef.current || !isEnglishEntry(entry) || entry.textJa) return null;
 
     setTranslatingIds((prev) => new Set(prev).add(entry.id));
     try {
@@ -1575,22 +1613,24 @@ export default function Home() {
       });
       const data = (await res.json()) as { textJa?: string; error?: string };
       if (!res.ok) {
-        setError(data.error || `翻訳に失敗しました (${res.status})`);
-        return;
+        const msg = data.error || `翻訳に失敗しました (${res.status})`;
+        setError(msg);
+        return { error: msg };
       }
-      if (!data.textJa?.trim()) {
+      const textJa = data.textJa?.trim();
+      if (!textJa) {
         setError('翻訳結果が空でした。');
-        return;
+        return { error: '翻訳結果が空でした。' };
       }
       setEntries((prev) =>
-        prev.map((e) =>
-          e.id === entry.id ? { ...e, textJa: data.textJa!.trim() } : e
-        )
+        prev.map((e) => (e.id === entry.id ? { ...e, textJa } : e))
       );
       setError('');
+      return { textJa };
     } catch (e) {
       console.error('translate failed:', e);
       setError('翻訳リクエストに失敗しました。');
+      return { error: '翻訳リクエストに失敗しました。' };
     } finally {
       setTranslatingIds((prev) => {
         const next = new Set(prev);
@@ -1602,16 +1642,66 @@ export default function Home() {
 
   const translateAllEnglish = async () => {
     const targets = entries.filter((e) => isEnglishEntry(e) && !e.textJa);
-    for (const entry of targets) {
+    if (targets.length === 0) return;
+    const items: TranslateResultItem[] = [];
+    const errors: string[] = [];
+    setTranslateModal({
+      phase: 'running',
+      total: targets.length,
+      finished: 0,
+      currentNote: targets[0]!.note,
+      items: [],
+      errors: [],
+    });
+    for (let i = 0; i < targets.length; i++) {
+      const entry = targets[i]!;
+      setTranslateModal((prev) =>
+        prev ? { ...prev, currentNote: entry.note } : prev
+      );
       // Sequential to avoid rate limits
-      await translateEntry(entry);
+      const result = await translateEntry(entry);
+      if (result && 'textJa' in result) {
+        items.push({ id: entry.id, note: entry.note, text: entry.text, textJa: result.textJa });
+      } else if (result && 'error' in result) {
+        errors.push(`#${formatNote(entry.note)}: ${result.error}`);
+      }
+      setTranslateModal((prev) =>
+        prev
+          ? { ...prev, finished: i + 1, items: [...items], errors: [...errors] }
+          : prev
+      );
     }
+    setTranslateModal((prev) =>
+      prev
+        ? {
+            ...prev,
+            phase: items.length === 0 && errors.length > 0 ? 'error' : 'done',
+            currentNote: undefined,
+          }
+        : prev
+    );
+  };
+
+  const openTranslationView = (entry: TranscriptEntry) => {
+    if (!entry.textJa) return;
+    setTranslateModal({
+      phase: 'view',
+      total: 1,
+      finished: 1,
+      items: [{ id: entry.id, note: entry.note, text: entry.text, textJa: entry.textJa }],
+      errors: [],
+    });
+  };
+
+  const closeTranslateModal = () => {
+    setTranslateModal((prev) => (prev?.phase === 'running' ? prev : null));
   };
 
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        setTranslateModal((prev) => (prev?.phase === 'running' ? prev : null));
         setSelectedIds(new Set());
         setSelectionKind('cards');
         setArmedDelete(null);
@@ -1867,15 +1957,12 @@ export default function Home() {
   };
 
   const renderEntryCard = (entry: TranscriptEntry) => {
-    const isSelf = entry.speakerId === 1;
-    const isOther = entry.speakerId != null && entry.speakerId !== 1;
-    const speakerTag = quietSpeakerTag(entry.speakerId, entry.source);
+    const badge = cardSpeakerBadge(entry.speakerId, entry.source);
     const selected = selectionKind === 'cards' && selectedIds.has(entry.id);
-    const tone = isSelf
-      ? `${styles.entry} ${styles.entrySelf}`
-      : isOther
-        ? `${styles.entry} ${styles.entryOther}`
-        : styles.entry;
+    const tone = badge
+      ? `${styles.entry} ${CARD_TONE_CLASS[badge.tone]}`
+      : styles.entry;
+    const isTranslating = translatingIds.has(entry.id);
     return (
       <li
         key={entry.id}
@@ -1885,8 +1972,18 @@ export default function Home() {
         <div className={styles.entryMetaMinimal}>
           <span className={styles.entryMetaLead}>
             <span className={styles.entryIndex}>#{formatNote(entry.note)}</span>
-            {speakerTag && (
-              <span className={styles.entrySpeakerQuiet}>{speakerTag}</span>
+            {badge && (
+              <span
+                className={`${styles.entrySpeakerBadge} ${BADGE_TONE_CLASS[badge.tone]}`}
+                aria-label={`話者: ${badge.label}`}
+              >
+                {badge.label}
+              </span>
+            )}
+            {isTranslating && (
+              <span className={styles.entryTranslatingHint} role="status">
+                翻訳中…
+              </span>
             )}
           </span>
           <time className={styles.entryTime} dateTime={entry.at}>
@@ -1911,8 +2008,28 @@ export default function Home() {
         </div>
         <pre className={styles.transcript} data-transcript="">{entry.text}</pre>
         {entry.textJa && (
-          <div className={styles.translationBlock}>
-            <div className={styles.translationLabel}>日本語訳（ローカル）</div>
+          <div
+            className={styles.translationBlock}
+            role="button"
+            tabIndex={0}
+            aria-label="日本語訳を大きく表示"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              if (window.getSelection()?.toString()) return;
+              e.stopPropagation();
+              openTranslationView(entry);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openTranslationView(entry);
+              }
+            }}
+          >
+            <div className={styles.translationLabel}>
+              <span>日本語訳（Ollama後翻訳）</span>
+              <span className={styles.translationLabelHint}>タップで拡大</span>
+            </div>
             <pre className={styles.transcriptJa}>{entry.textJa}</pre>
           </div>
         )}
@@ -2001,9 +2118,11 @@ export default function Home() {
           onClick={translateAllEnglish}
           disabled={translatingIds.size > 0 || isRecording}
         >
-          {translateConfigured
-            ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
-            : 'Ollamaで全て翻訳'}
+          {translatingIds.size > 0
+            ? 'Ollama翻訳中…'
+            : translateConfigured
+              ? `Ollamaで全て翻訳 (${untranslatedEn.length})`
+              : 'Ollamaで全て翻訳'}
         </button>
       )}
       <button
@@ -2062,6 +2181,115 @@ export default function Home() {
     </div>
   );
 
+  const renderTranslateModal = () => {
+    if (!translateModal) return null;
+    const m = translateModal;
+    const running = m.phase === 'running';
+    const pct = m.total > 0 ? Math.round((m.finished / m.total) * 100) : 0;
+    const title = m.phase === 'view' ? '日本語訳' : 'Ollama後翻訳';
+    const statusText = running
+      ? `翻訳中… ${m.finished} / ${m.total}${
+          m.currentNote != null ? `（#${formatNote(m.currentNote)} を処理中）` : ''
+        }`
+      : m.phase === 'error'
+        ? '翻訳に失敗しました'
+        : m.phase === 'done'
+          ? `翻訳完了 · ${m.items.length}件${m.errors.length ? ` · 失敗 ${m.errors.length}件` : ''}`
+          : `#${formatNote(m.items[0]?.note ?? 0)} の訳`;
+    const statusClass = running
+      ? styles.translateModalStatusRunning
+      : m.phase === 'error'
+        ? styles.translateModalStatusError
+        : styles.translateModalStatusDone;
+    return (
+      <div className={styles.translateModalRoot}>
+        <button
+          type="button"
+          className={styles.translateModalBackdrop}
+          aria-label="翻訳を閉じる"
+          onClick={closeTranslateModal}
+          disabled={running}
+        />
+        <div
+          className={styles.translateModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+        >
+          <div className={styles.translateModalHeader}>
+            <div>
+              <h2 className={styles.translateModalTitle}>{title}</h2>
+              <p
+                className={`${styles.translateModalStatus} ${statusClass}`}
+                role="status"
+                aria-live="polite"
+              >
+                {statusText}
+              </p>
+            </div>
+            <button
+              type="button"
+              className={styles.translateModalClose}
+              onClick={closeTranslateModal}
+              disabled={running}
+              aria-label="翻訳を閉じる"
+            >
+              ×
+            </button>
+          </div>
+          {m.phase !== 'view' && (
+            <div className={styles.translateProgressTrack} aria-hidden="true">
+              <div
+                className={styles.translateProgressFill}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          )}
+          <div className={styles.translateModalBody}>
+            {m.items.length === 0 && m.errors.length === 0 && (
+              <p className={styles.translateModalEmpty}>
+                {running ? 'Ollama で英語の発言を日本語に翻訳しています…' : '翻訳結果はありません。'}
+              </p>
+            )}
+            {m.items.map((item) => (
+              <div key={item.id} className={styles.translateResultCard}>
+                <div className={styles.translateResultMeta}>#{formatNote(item.note)}</div>
+                <pre className={styles.translateResultJa}>{item.textJa}</pre>
+                <p className={styles.translateResultEn}>{item.text}</p>
+              </div>
+            ))}
+            {m.errors.map((msg) => (
+              <p key={msg} className={`${styles.translateModalEmpty} ${styles.translateModalStatusError}`}>
+                {msg}
+              </p>
+            ))}
+          </div>
+          {!running && (
+            <div className={styles.translateModalFooter}>
+              {m.items.length > 0 && (
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  onClick={() =>
+                    copyText(
+                      '__translate__',
+                      m.items.map((it) => it.textJa).join('\n\n')
+                    )
+                  }
+                >
+                  {copiedId === '__translate__' ? 'コピー済み' : '訳をコピー'}
+                </button>
+              )}
+              <button type="button" className={styles.ghostButton} onClick={closeTranslateModal}>
+                閉じる
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderNoteScreen = (
     title: string,
     subtitle: string,
@@ -2097,6 +2325,7 @@ export default function Home() {
       )}
 
       {renderSummaryPanel()}
+      {renderTranslateModal()}
 
       <section className={styles.feed}>
         <div className={styles.feedHeader}>
@@ -2165,6 +2394,7 @@ export default function Home() {
   return (
     <div className={`${styles.app} ${styles.homeScreen}`}>
       <div className={styles.bgGlow} aria-hidden="true" />
+      {renderTranslateModal()}
 
       <header className={styles.topBar}>
         <button
