@@ -1,5 +1,12 @@
 /** Speaker slots A–G (internal ids 1–7). */
 
+/** Speaker A — 自分 (explicit pick only in Zoom seminar). */
+export const SELF_SPEAKER_ID = 1;
+/** Speaker B — セミナー (Zoom / seminar default for unmarked speech). */
+export const SEMINAR_SPEAKER_ID = 2;
+/** Speaker C — それ以外. */
+export const OTHER_SPEAKER_ID = 3;
+
 export const SPEAKER_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const;
 export type SpeakerLetter = (typeof SPEAKER_LETTERS)[number];
 export const MAX_SPEAKERS = SPEAKER_LETTERS.length;

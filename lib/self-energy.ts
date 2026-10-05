@@ -1,8 +1,10 @@
 import { trackAudioContext } from '@/lib/capture-resources';
 
 /**
- * Zoom/system mode only: compare a parallel mic stream against system audio
- * to tag 自分 (A) vs それ以外 (C). Mic-only recording must not call this.
+ * GD / Zoom live only: compare a parallel mic stream against system audio
+ * to tag 自分 (A) vs それ以外 (C). Home Zoom seminar no longer uses this —
+ * unmarked speech defaults to セミナー and 自分 is explicit-pick only.
+ * Mic-only recording must not call this.
  *
  * RMS is computed on decoded float PCM (full scale ≈ 1) inside each
  * transcribed time window. Quiet windows stay unset.
