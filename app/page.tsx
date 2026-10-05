@@ -37,6 +37,15 @@ import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
 import { mergeSelectedCards } from '@/lib/merge-entries';
 import { coalesceHomeCaptureChunks } from '@/lib/coalesce-home-chunks';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
+import {
+  clearStoredMinutesBlocks,
+  entriesInBlock,
+  loadMinutesBlocks,
+  makeNextBlock,
+  saveMinutesBlocks,
+  ungroupedEntries,
+  type MinutesBlock,
+} from '@/lib/minutes-blocks';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -107,7 +116,7 @@ type TranscriptEntry = {
 };
 
 
-type Screen = 'home' | 'note1' | 'note2' | 'gd';
+type Screen = 'home' | 'note1' | 'note2' | 'minutes' | 'gd';
 
 type TranslateResultItem = {
   id: string;
@@ -187,6 +196,14 @@ function entryIdFromNode(node: EventTarget | Node | null): string | null {
         : null;
   const li = el?.closest('[data-entry-id]');
   return li?.getAttribute('data-entry-id') ?? null;
+}
+
+function formatClock(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
 }
 
 function formatNote(note: number): string {
@@ -285,6 +302,9 @@ export default function Home() {
   const [genre, setGenre] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** 議事録をまとめる — numbered note blocks #1, #2, … */
+  const [minutesBlocks, setMinutesBlocks] = useState<MinutesBlock[]>([]);
+  const [titlingIds, setTitlingIds] = useState<Set<string>>(() => new Set());
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
@@ -444,6 +464,7 @@ export default function Home() {
     setSummary(loadSummary());
     setGenre(loadGenre());
     setSpeakerLabels(loadSpeakerLabels());
+    setMinutesBlocks(loadMinutesBlocks());
     const mode = loadSpeakerMode();
     setSpeakerMode(mode);
     speakerModeRef.current = mode;
@@ -460,6 +481,11 @@ export default function Home() {
     const ceiling = Math.ceil(maxNote - 1e-9);
     if (ceiling > entriesLenRef.current) entriesLenRef.current = ceiling;
   }, [entries]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+    saveMinutesBlocks(minutesBlocks);
+  }, [minutesBlocks, historyReady]);
 
   useEffect(() => {
     if (!historyReady) return;
@@ -1345,20 +1371,11 @@ export default function Home() {
   };
 
   /**
-   * 下から順にまとめてコピー — whole transcript newest → oldest
-   * (bottom of Note 1 upward). Split pieces of one segment still read downward.
+   * 古い順にまとめてコピー — whole transcript oldest → newest (top of Note 1 down).
+   * Goes through copySelection, so it also moves the 前回の続き cursor.
    */
-  const copyAllReversed = async () => {
-    if (entries.length === 0) {
-      flashCopyHint('コピーする発言がありません');
-      return;
-    }
-    const text = newestFirstReadingOrder(entries)
-      .map(formatEntryForCopy)
-      .join('\n\n---\n\n');
-    const copiedAt = Date.now();
-    const ok = await copyText('__reverse__', text);
-    if (ok) saveLastCopyAt(copiedAt);
+  const copyAllOldestFirst = () => {
+    void copySelection('__oldest__', entries, 'コピーする発言がありません');
   };
 
   /** 前回の続き — items newer than the last successful copy. */
@@ -1374,6 +1391,9 @@ export default function Home() {
     void copySelection('__since__', newer, '新しい発言なし');
   };
 
+  const pendingMinutes = ungroupedEntries(entries, minutesBlocks);
+  const nextBlockNo =
+    minutesBlocks.reduce((max, b) => Math.max(max, b.index), 0) + 1;
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
   // Home only: newer segments on top, split pieces of one segment still read downward.
@@ -1395,6 +1415,8 @@ export default function Home() {
     clearStoredEntries();
     clearStoredSummary();
     clearStoredSpeakerLabels();
+    setMinutesBlocks([]);
+    clearStoredMinutesBlocks();
     void clearAllAudio().catch((err) => console.error('audio clear failed:', err));
   };
 
@@ -1490,14 +1512,63 @@ export default function Home() {
     // Stay anchored to the chip — do not scroll the page away from the toggle.
   };
 
-  /** 議事録をまとめる — open the summary popover and run the Ollama summary. */
-  const summarizeMinutesFromMenu = () => {
-    openSummaryPanel();
-    if (entries.length === 0) {
-      setError('文字起こしがあると議事録をまとめられます。');
+  /** Best-effort Ollama heading for a block. Silent on failure. */
+  const requestBlockTitle = async (block: MinutesBlock, items: TranscriptEntry[]) => {
+    if (items.length === 0) return;
+    setTitlingIds((prev) => new Set(prev).add(block.id));
+    try {
+      const res = await fetch('/api/minutes-title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: items.map(formatEntryForCopy).join('\n\n'),
+          genre: genre.trim() || undefined,
+        }),
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { title?: string };
+      const title = data.title?.trim();
+      if (!title) return;
+      setMinutesBlocks((prev) =>
+        prev.map((b) => (b.id === block.id ? { ...b, title } : b))
+      );
+    } catch {
+      // Ollama is optional; keep the plain #N heading.
+    } finally {
+      setTitlingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(block.id);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * 議事録をまとめる — cards since the last grouping become the next block #N.
+   * Works without Ollama; a short heading is added when Ollama answers.
+   */
+  const groupMinutes = () => {
+    setMenuOpen(false);
+    const block = makeNextBlock(entries, minutesBlocks);
+    setScreen('minutes');
+    if (!block) {
+      flashCopyHint(entries.length === 0 ? 'まとめる発言がありません' : '新しい発言なし');
       return;
     }
-    void runSummary();
+    setMinutesBlocks((prev) => [...prev, block]);
+    void requestBlockTitle(block, entriesInBlock(entries, block));
+  };
+
+  /** Undo the newest block only, so ranges stay contiguous. */
+  const ungroupLastBlock = (id: string) => {
+    setMinutesBlocks((prev) => {
+      const last = prev[prev.length - 1];
+      return last && last.id === id ? prev.slice(0, -1) : prev;
+    });
+  };
+
+  const copyBlock = (block: MinutesBlock) => {
+    void copySelection(`__blk_${block.id}__`, entriesInBlock(entries, block), '発言なし');
   };
 
   const toggleSummaryPanel = () => {
@@ -2163,11 +2234,10 @@ export default function Home() {
       <button
         type="button"
         className={styles.ghostButton}
-        onClick={() => void copyAllReversed()}
+        onClick={copyAllOldestFirst}
         disabled={entries.length === 0}
-        title="新しい発言 → 古い発言の順（下から上へ）でまとめてコピー"
       >
-        {copiedId === '__reverse__' ? 'コピー済み' : '下から順にまとめてコピー'}
+        {copiedId === '__oldest__' ? 'コピー済み' : '古い順にまとめてコピー'}
       </button>
       <button
         type="button"
@@ -2399,6 +2469,162 @@ export default function Home() {
     </div>
   );
 
+  const renderMinutesLine = (entry: TranscriptEntry) => {
+    const badge = cardSpeakerBadge(entry.speakerId, entry.source);
+    return (
+      <li key={entry.id} className={styles.minutesLine}>
+        <span className={styles.minutesLineMeta}>
+          <span className={styles.minutesLineNo}>#{formatNote(entry.note)}</span>
+          {badge && (
+            <span className={`${styles.entrySpeakerBadge} ${BADGE_TONE_CLASS[badge.tone]}`}>
+              {badge.label}
+            </span>
+          )}
+          <time dateTime={entry.at}>{formatClock(entry.at)}</time>
+        </span>
+        <p className={styles.minutesLineText}>{entry.text}</p>
+        {entry.textJa && <p className={styles.minutesLineJa}>{entry.textJa}</p>}
+      </li>
+    );
+  };
+
+  const renderMinutesScreen = () => {
+    const lastId = minutesBlocks[minutesBlocks.length - 1]?.id;
+    return (
+      <div className={styles.app}>
+        <div className={styles.bgGlow} aria-hidden="true" />
+
+        <header className={styles.noteTopBar}>
+          <button
+            type="button"
+            className={styles.backButton}
+            onClick={() => setScreen('home')}
+          >
+            <span className={styles.backChevron} aria-hidden="true" />
+            Home
+          </button>
+          <div className={styles.noteHeading}>
+            <h1 className={styles.title}>議事録ノート</h1>
+            <p className={styles.subtitle}>
+              {minutesBlocks.length > 0 ? `#1 – #${minutesBlocks.length}` : 'まだブロックなし'}
+            </p>
+          </div>
+          <div className={styles.topMeta}>
+            <StopShareButton />
+            <span className={styles.metaChip}>{entries.length}件</span>
+          </div>
+        </header>
+
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
+        )}
+
+        <section className={styles.feed}>
+          <div className={styles.minutesToolbar}>
+            <button
+              type="button"
+              className={styles.minutesSummaryButton}
+              onClick={groupMinutes}
+              disabled={pendingMinutes.length === 0}
+            >
+              {pendingMinutes.length > 0
+                ? `議事録をまとめる → #${nextBlockNo}（${pendingMinutes.length}件）`
+                : '議事録をまとめる'}
+            </button>
+            {copyHint ? (
+              <span className={styles.copyHint} role="status">
+                {copyHint}
+              </span>
+            ) : null}
+          </div>
+
+          {minutesBlocks.length === 0 && pendingMinutes.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyOrb} aria-hidden="true" />
+              <h3 className={styles.emptyTitle}>まだ発言がありません</h3>
+              <button
+                type="button"
+                className={styles.recordButton}
+                onClick={() => setScreen('home')}
+              >
+                Homeへ
+              </button>
+            </div>
+          ) : (
+            <ol className={styles.minutesBlockList}>
+              {minutesBlocks.map((block) => {
+                const items = entriesInBlock(entries, block);
+                const first = items[0];
+                const last = items[items.length - 1];
+                const range =
+                  first && last
+                    ? `${formatClock(first.at)} – ${formatClock(last.at)}`
+                    : '';
+                return (
+                  <li key={block.id} className={styles.minutesBlock}>
+                    <div className={styles.minutesBlockHead}>
+                      <span className={styles.minutesBlockNo}>#{block.index}</span>
+                      <div className={styles.minutesBlockHeading}>
+                        <h3 className={styles.minutesBlockTitle}>
+                          {block.title ||
+                            (titlingIds.has(block.id) ? '見出し生成中…' : range || '（空）')}
+                        </h3>
+                        <p className={styles.minutesBlockMeta}>
+                          {block.title && range ? `${range} · ` : ''}
+                          {items.length}件
+                        </p>
+                      </div>
+                      <div className={styles.minutesBlockActions}>
+                        <button
+                          type="button"
+                          className={styles.ghostButton}
+                          onClick={() => copyBlock(block)}
+                          disabled={items.length === 0}
+                        >
+                          {copiedId === `__blk_${block.id}__` ? 'コピー済み' : 'コピー'}
+                        </button>
+                        {block.id === lastId && (
+                          <button
+                            type="button"
+                            className={styles.ghostButton}
+                            onClick={() => ungroupLastBlock(block.id)}
+                          >
+                            解除
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {items.length > 0 && (
+                      <ol className={styles.minutesLines}>{items.map(renderMinutesLine)}</ol>
+                    )}
+                  </li>
+                );
+              })}
+              {pendingMinutes.length > 0 && (
+                <li className={`${styles.minutesBlock} ${styles.minutesBlockPending}`}>
+                  <div className={styles.minutesBlockHead}>
+                    <span className={styles.minutesBlockNo}>#{nextBlockNo}</span>
+                    <div className={styles.minutesBlockHeading}>
+                      <h3 className={styles.minutesBlockTitle}>未まとめ</h3>
+                      <p className={styles.minutesBlockMeta}>{pendingMinutes.length}件</p>
+                    </div>
+                  </div>
+                  <ol className={styles.minutesLines}>
+                    {pendingMinutes.map(renderMinutesLine)}
+                  </ol>
+                </li>
+              )}
+            </ol>
+          )}
+        </section>
+      </div>
+    );
+  };
+
+  if (screen === 'minutes') return renderMinutesScreen();
+
   if (screen === 'note1') {
     return renderNoteScreen(
       'Note 1',
@@ -2449,11 +2675,14 @@ export default function Home() {
         <button
           type="button"
           className={styles.minutesSummaryButton}
-          onClick={summarizeMinutesFromMenu}
-          disabled={isSummarizing}
-          title="Ollamaで 議題・決定・アクション をまとめる"
+          onClick={groupMinutes}
+          disabled={!historyReady}
+          title={`未まとめ ${pendingMinutes.length}件 → #${nextBlockNo}`}
         >
-          {isSummarizing ? 'まとめ中…' : '議事録をまとめる'}
+          議事録をまとめる
+          {pendingMinutes.length > 0 && (
+            <span className={styles.minutesPendingBadge}>{pendingMinutes.length}</span>
+          )}
         </button>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true" />
@@ -2492,6 +2721,13 @@ export default function Home() {
             onClick={() => setScreen('note2')}
           >
             Note 2 · 新しい順
+          </button>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={() => setScreen('minutes')}
+          >
+            議事録ノート{minutesBlocks.length > 0 ? ` · #${minutesBlocks.length}` : ''}
           </button>
         </div>
         <div className={styles.statusGenreRow}>
@@ -2534,14 +2770,13 @@ export default function Home() {
               <button
                 type="button"
                 className={`${styles.menuItem} ${styles.menuItemFeatured}`}
-                onClick={summarizeMinutesFromMenu}
-                disabled={isSummarizing}
+                onClick={groupMinutes}
               >
-                <span className={styles.menuItemTitle}>
-                  {isSummarizing ? '議事録をまとめ中…' : '議事録をまとめる'}
-                </span>
+                <span className={styles.menuItemTitle}>議事録をまとめる</span>
                 <span className={styles.menuItemDesc}>
-                  Ollamaで 議題・決定・アクション を要約
+                  {pendingMinutes.length > 0
+                    ? `未まとめ ${pendingMinutes.length}件 → #${nextBlockNo}`
+                    : `議事録ノート（${minutesBlocks.length}ブロック）`}
                 </span>
               </button>
               <button
