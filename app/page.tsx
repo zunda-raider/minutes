@@ -1344,6 +1344,23 @@ export default function Home() {
     );
   };
 
+  /**
+   * 下から順にまとめてコピー — whole transcript newest → oldest
+   * (bottom of Note 1 upward). Split pieces of one segment still read downward.
+   */
+  const copyAllReversed = async () => {
+    if (entries.length === 0) {
+      flashCopyHint('コピーする発言がありません');
+      return;
+    }
+    const text = newestFirstReadingOrder(entries)
+      .map(formatEntryForCopy)
+      .join('\n\n---\n\n');
+    const copiedAt = Date.now();
+    const ok = await copyText('__reverse__', text);
+    if (ok) saveLastCopyAt(copiedAt);
+  };
+
   /** 前回の続き — items newer than the last successful copy. */
   const copySinceLast = () => {
     const cursor = loadLastCopyAt();
@@ -1471,6 +1488,16 @@ export default function Home() {
     setSummaryOpen(true);
     setMenuOpen(false);
     // Stay anchored to the chip — do not scroll the page away from the toggle.
+  };
+
+  /** 議事録をまとめる — open the summary popover and run the Ollama summary. */
+  const summarizeMinutesFromMenu = () => {
+    openSummaryPanel();
+    if (entries.length === 0) {
+      setError('文字起こしがあると議事録をまとめられます。');
+      return;
+    }
+    void runSummary();
   };
 
   const toggleSummaryPanel = () => {
@@ -2136,6 +2163,15 @@ export default function Home() {
       <button
         type="button"
         className={styles.ghostButton}
+        onClick={() => void copyAllReversed()}
+        disabled={entries.length === 0}
+        title="新しい発言 → 古い発言の順（下から上へ）でまとめてコピー"
+      >
+        {copiedId === '__reverse__' ? 'コピー済み' : '下から順にまとめてコピー'}
+      </button>
+      <button
+        type="button"
+        className={styles.ghostButton}
         onClick={copySeminarOnly}
         disabled={entries.length === 0}
       >
@@ -2410,6 +2446,15 @@ export default function Home() {
             <span />
           </span>
         </button>
+        <button
+          type="button"
+          className={styles.minutesSummaryButton}
+          onClick={summarizeMinutesFromMenu}
+          disabled={isSummarizing}
+          title="Ollamaで 議題・決定・アクション をまとめる"
+        >
+          {isSummarizing ? 'まとめ中…' : '議事録をまとめる'}
+        </button>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true" />
           <div className={styles.brandText}>
@@ -2486,6 +2531,19 @@ export default function Home() {
               </button>
             </div>
             <nav className={styles.menuNav}>
+              <button
+                type="button"
+                className={`${styles.menuItem} ${styles.menuItemFeatured}`}
+                onClick={summarizeMinutesFromMenu}
+                disabled={isSummarizing}
+              >
+                <span className={styles.menuItemTitle}>
+                  {isSummarizing ? '議事録をまとめ中…' : '議事録をまとめる'}
+                </span>
+                <span className={styles.menuItemDesc}>
+                  Ollamaで 議題・決定・アクション を要約
+                </span>
+              </button>
               <button
                 type="button"
                 className={styles.menuItem}
