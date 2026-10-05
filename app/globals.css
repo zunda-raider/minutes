@@ -1,6 +1,6 @@
 :root {
-  --background: #05070c;
-  --foreground: #eef4fb;
+  --background: #070605;
+  --foreground: #f8f1e3;
 }
 
 html,
@@ -14,8 +14,8 @@ body {
 body {
   color: var(--foreground);
   background:
-    radial-gradient(980px 520px at 12% -12%, rgba(103, 212, 255, 0.13), transparent 58%),
-    radial-gradient(760px 420px at 92% -6%, rgba(122, 166, 255, 0.08), transparent 55%),
+    radial-gradient(900px 280px at 50% -18%, rgba(246, 212, 138, 0.14), transparent 60%),
+    radial-gradient(520px 240px at 100% 0%, rgba(201, 146, 58, 0.06), transparent 55%),
     var(--background);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -40,7 +40,7 @@ html {
 
 button:focus-visible,
 select:focus-visible {
-  outline: 2px solid #7ad4ff;
+  outline: 2px solid #f6d48a;
   outline-offset: 2px;
 }
 
