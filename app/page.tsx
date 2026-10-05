@@ -27,6 +27,8 @@ import {
   ASSIGN_BUCKETS,
   cardSpeakerBadge,
   type CardSpeakerTone,
+  SELF_SPEAKER_ID,
+  SEMINAR_SPEAKER_ID,
   SPEAKER_LETTERS,
   ZOOM_CATEGORIES,
   zoomCategoryForSpeaker,
@@ -53,10 +55,6 @@ import {
   provisionalTurnsFromPitch,
   type PitchCentroid,
 } from '@/lib/pitch-diarize';
-import {
-  speakersFromMicEnergy,
-  type EnergyWindow,
-} from '@/lib/self-energy';
 import type { WhisperSegment } from '@/lib/diarize-parse';
 import {
   clearAllAudio,
@@ -79,7 +77,6 @@ import {
   isCaptureStale,
   markCaptureStale,
   openRecordedSlice,
-  openSelfMic,
   primeCaptureTap,
   reviveHeldCapture,
   pickRecorderMimeType,
@@ -313,8 +310,6 @@ export default function Home() {
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
   /** Active speaker while recording (Zoom A–G or mic role). Optional; sort afterward. */
   const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
-  /** Set when Zoom mic permission is denied; energy tagging stays off. */
-  const [selfMicNote, setSelfMicNote] = useState('');
   /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   /** Ids waiting for a second click to confirm delete. */
@@ -352,7 +347,7 @@ export default function Home() {
   const releasingRef = useRef(false);
   const stopTracksRef = useRef<() => void>(() => {});
   const stopRecordingRef = useRef<() => void>(() => {});
-  /** Parallel mic used only in Zoom/system mode, for 自分 energy — not STT. */
+  /** Legacy parallel-mic slot (Home Zoom no longer opens it for auto-自分). */
   const micStreamRef = useRef<MediaStream | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
   /** User picked a Zoom speaker during the current segment (overrides energy). */
@@ -539,8 +534,11 @@ export default function Home() {
 
   useEffect(() => {
     audioSourceRef.current = audioSource;
-    // Mic only uses roles 1–2; clamp if switching from Zoom A–G
-    if (audioSource === 'mic') {
+    if (audioSource === 'system') {
+      // Zoom / seminar: default unmarked speech to セミナー; 自分 is explicit only.
+      setActiveSpeakerId(SEMINAR_SPEAKER_ID);
+    } else {
+      // Mic only uses roles 1–2; clamp if switching from Zoom A–G
       setActiveSpeakerId((cur) => (cur > 2 ? 1 : cur));
     }
   }, [audioSource]);
@@ -661,38 +659,9 @@ export default function Home() {
 
         let chunks: Array<{ speaker?: number; text: string }> = [];
 
-        const useMicEnergy =
-          job.source === 'system' &&
-          !job.manualLock &&
-          job.micBlob != null &&
-          job.micBlob.size > 0 &&
-          text.length > 0;
-
-        if (useMicEnergy) {
-          // Zoom only: one energy window for the whole Home cut (~60s).
-          // Per-Whisper-row cards stay on GD live (transcribe-zoom).
-          // Mic-only jobs never carry micBlob, so they stay on the manual role.
-          try {
-            if (controller.signal.aborted || queueEpochRef.current !== epoch) break;
-            const timed: EnergyWindow[] = [
-              { text, startSec: 0, endSec: Number.POSITIVE_INFINITY },
-            ];
-            const tagged = await speakersFromMicEnergy(
-              blob,
-              job.micBlob!,
-              timed,
-              controller.signal
-            );
-            if (queueEpochRef.current !== epoch || controller.signal.aborted) break;
-            chunks = tagged.map((row) => ({
-              text: row.text,
-              speaker: row.speakerId,
-            }));
-          } catch (energyErr) {
-            console.warn('mic energy self-tag failed:', energyErr);
-            chunks = [{ text, speaker: undefined }];
-          }
-        } else if (mode === 'auto' && hasWhisperDiarize) {
+        // Home Zoom seminar: do not auto-tag 自分 from parallel-mic energy.
+        // Unmarked / auto speech becomes セミナー; 自分 only via explicit pick (manualLock).
+        if (mode === 'auto' && hasWhisperDiarize) {
           const { turns, lastSpeaker } = remapSpeakersContinuity(
             data.turns!,
             lastSpeakerRef.current
@@ -741,6 +710,24 @@ export default function Home() {
 
         // One Home capture ≈ HOME_SEGMENT_MS; do not keep Whisper-fine cards.
         chunks = coalesceHomeCaptureChunks(chunks);
+
+        if (job.source === 'system' && !job.manualLock) {
+          // Zoom seminar: unmarked → セミナー. Auto diarize/pitch must not
+          // surface 自分; keep an explicit picker selection (manual stamp).
+          if (mode === 'manual') {
+            const fallback = job.speakerId ?? SEMINAR_SPEAKER_ID;
+            chunks = chunks.map((row) =>
+              row.speaker == null ? { ...row, speaker: fallback } : row
+            );
+          } else {
+            chunks = chunks.map((row) => {
+              if (row.speaker == null || row.speaker === SELF_SPEAKER_ID) {
+                return { ...row, speaker: SEMINAR_SPEAKER_ID };
+              }
+              return row;
+            });
+          }
+        }
 
         if (text.length > 0 || chunks.some((t) => t.text.trim())) {
           const newEntries: TranscriptEntry[] = [];
@@ -1046,13 +1033,9 @@ export default function Home() {
 
     if (!reuse || !stream) {
       if (streamRef.current || micStreamRef.current) stopTracks();
-      const wantSelfMic = source === 'system';
-      const selfMicPromise = wantSelfMic ? openSelfMic() : Promise.resolve(null);
       try {
         stream = await acquireAudioStream(source);
       } catch (e) {
-        const leftover = await selfMicPromise;
-        stopMediaTracks(leftover);
         const err = e as DOMException | Error;
         console.error('音声ソース取得エラー:', err);
         if (err.name === 'AbortError' || err.name === 'NotAllowedError') {
@@ -1075,36 +1058,17 @@ export default function Home() {
         return;
       }
 
-      const selfMic = await selfMicPromise;
       if (generation !== captureGeneration()) {
-        stopMediaTracks(stream, selfMic);
+        stopMediaTracks(stream);
         return;
       }
-      if (wantSelfMic) {
-        micStreamRef.current = selfMic;
-        setSelfMicNote(
-          selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
-        );
-      } else {
-        stopMediaTracks(selfMic);
-        micStreamRef.current = null;
-        setSelfMicNote('');
-      }
+      // Home Zoom seminar: no parallel mic for auto-自分.
+      micStreamRef.current = null;
       heldSourceRef.current = source;
-    } else if (source === 'system' && !hasLiveAudio(micStreamRef.current)) {
-      // A muted or ended mic still holds the device. Leaving it up makes the
-      // next getUserMedia come back silent.
+    } else if (micStreamRef.current) {
+      // Drop leftover parallel mic from older sessions (auto-自分 removed).
       stopMediaTracks(micStreamRef.current);
       micStreamRef.current = null;
-      const selfMic = await openSelfMic();
-      if (generation !== captureGeneration()) {
-        stopMediaTracks(selfMic);
-        return;
-      }
-      micStreamRef.current = selfMic;
-      setSelfMicNote(
-        selfMic ? '' : 'マイクが使えないため、「自分」の自動判定はオフです。'
-      );
     }
 
     streamRef.current = stream;
@@ -2090,6 +2054,22 @@ export default function Home() {
           <button
             type="button"
             className={
+              copiedId === entry.id
+                ? `${styles.entryCopy} ${styles.entryCopyDone}`
+                : styles.entryCopy
+            }
+            aria-label="この発言をコピー"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              void copyText(entry.id, formatEntryForCopy(entry));
+            }}
+          >
+            {copiedId === entry.id ? 'コピー済み' : 'コピー'}
+          </button>
+          <button
+            type="button"
+            className={
               armedDelete?.length === 1 && armedDelete[0] === entry.id
                 ? `${styles.entryDelete} ${styles.entryDeleteArmed}`
                 : styles.entryDelete
@@ -2894,9 +2874,6 @@ export default function Home() {
                 Zoom・LINE・他
               </button>
             </div>
-            {audioSource === 'system' && selfMicNote ? (
-              <p className={styles.genreHint}>{selfMicNote}</p>
-            ) : null}
           </div>
 
           <div className={styles.dockGroup}>
