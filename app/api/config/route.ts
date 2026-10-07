@@ -3,6 +3,7 @@ import { getWhisperLangConfig, langLabel } from '@/lib/whisper-lang';
 import { getOllamaBaseUrl, getOllamaModel, resolveOllamaBin } from '@/lib/ollama';
 import { getDiarizeConfig } from '@/lib/whisper-diarize';
 import { getWhisperModelSlots } from '@/lib/whisper-model';
+import { isDbConfigured } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,6 +33,7 @@ export async function GET() {
     },
     openaiConfigured,
     whisperModels: models.slots,
+    databaseConfigured: isDbConfigured(),
     diarize: {
       enabled: diarize.enabled,
       mode: diarize.mode,

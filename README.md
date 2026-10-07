@@ -41,6 +41,7 @@ cp .env.example .env.local
 | `WHISPER_DIARIZE_MODE` | No | `tdrz` / `embedding` / `extra` |
 | `WHISPER_SPEAKER_MODEL` | No | embedding 用スピーカーモデル |
 | `WHISPER_DIARIZE_ARGS` | No | whisper-cli 追加引数 |
+| `DATABASE_URL` | No | PostgreSQL 接続（議事録ノート永続化。例は `.env.example`） |
 
 
 ### Windows の例
@@ -110,6 +111,53 @@ OLLAMA_BIN=/usr/local/bin/ollama
 - **できない:** ブラウザだけで Ollama を起動すること、Vercel 等のサーバーレス
 
 起動に失敗した場合は、brew パス（`/usr/local/bin/ollama serve`）を含むエラーを UI に出します。
+
+
+## PostgreSQL（議事録ノートの永続化）
+
+会議ノート（ハンバーガー「議事録」）とカードは、設定時 **PostgreSQL** に保存します（ブラウザの localStorage もキャッシュ／オフライン用に併用）。
+
+### 1. Postgres を起動
+
+```bash
+docker compose up -d db
+# または
+npm run db:up
+```
+
+`docker-compose.yml` の既定はユーザー `minutes_user` / DB `minutes_db` / ポート `5432` です。初回起動時に `db/schema.sql` が自動適用されます。
+
+### 2. 環境変数
+
+`.env.local` に追加（`.env.example` 参照）:
+
+```env
+DATABASE_URL=postgresql://minutes_user:minutes_pass@127.0.0.1:5432/minutes_db
+```
+
+| 変数 | 必須 | 説明 |
+|------|------|------|
+| `DATABASE_URL` | 議事録の DB 保存時 | `pg` 接続文字列。未設定なら API は 503 で、UI は localStorage のみ |
+
+### 3. マイグレーション
+
+ボリュームが既にある場合やスキーマを手で当て直すとき:
+
+```bash
+npm run db:migrate
+```
+
+### 4. API
+
+| Method | Path | 説明 |
+|--------|------|------|
+| GET | `/api/meetings` | ノート一覧（カード込み） |
+| PUT | `/api/meetings` | 全件置換（同期・localStorage 移行） |
+| POST | `/api/meetings` | 1件 upsert |
+| GET/PUT/DELETE | `/api/meetings/[id]` | 単一ノート |
+| POST | `/api/meetings/[id]/cards` | カード追加（id で重複除外） |
+
+Home 起動時に DB があればそれを優先し、DB が空で localStorage にノートがあれば自動で PUT 同期します。
 
 ## 起動
 
