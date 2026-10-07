@@ -1,9 +1,9 @@
 /**
- * Named meeting notebooks — archive Home transcript cards by hand
+ * Named meeting notebooks — archive transcript cards by hand
  * (date + title), not an LLM summary.
  *
- * Cards are snapshotted into the meeting so Home can be cleared for the
- * next session without losing the notebook.
+ * Per-card 「議事録に入れる」 snapshots a card into a named meeting
+ * (mic / Zoom / GD harbor alike) so it leaves Home without losing the notebook.
  */
 
 import type { StoredTranscriptEntry } from './history-storage';

@@ -24,6 +24,8 @@ type Props = {
   genre: string;
   historyReady: boolean;
   onBack: () => void;
+  /** Open the Home meeting-notebook picker for this transcript card. */
+  onAddToMeeting?: (cardId: string) => void;
 };
 
 function entryText(entry: GdHistoryEntry): string {
@@ -92,7 +94,7 @@ function speakerCaption(entry: GdHistoryEntry): string {
 }
 
 
-export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
+export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting }: Props) {
   const ordered = useMemo(
     () => [...entries].sort((a, b) => a.note - b.note),
     [entries]
@@ -297,21 +299,37 @@ export function GdScreen({ entries, genre, historyReady, onBack }: Props) {
                   const on = selected.has(entry.id);
                   const role = gdSpeakerFromId(entry.speakerId);
                   return (
-                    <button
+                    <div
                       key={entry.id}
-                      type="button"
                       className={on ? `${gd.cargo} ${gd.cargoOn}` : gd.cargo}
-                      aria-pressed={on}
-                      onClick={() => toggleCargo(entry.id)}
                     >
-                      <span className={gd.cargoTop}>
-                        <span className={gd.cargoNote}>#{formatGdNote(entry.note)}</span>
-                        <span className={role === '自分' ? gd.selfTag : gd.otherTag}>
-                          {speakerCaption(entry)}
+                      <button
+                        type="button"
+                        className={gd.cargoSelect}
+                        aria-pressed={on}
+                        onClick={() => toggleCargo(entry.id)}
+                      >
+                        <span className={gd.cargoTop}>
+                          <span className={gd.cargoNote}>#{formatGdNote(entry.note)}</span>
+                          <span className={role === '自分' ? gd.selfTag : gd.otherTag}>
+                            {speakerCaption(entry)}
+                          </span>
                         </span>
-                      </span>
-                      <span className={gd.cargoExcerpt}>{ticket(entryText(entry))}</span>
-                    </button>
+                        <span className={gd.cargoExcerpt}>{ticket(entryText(entry))}</span>
+                      </button>
+                      {onAddToMeeting && (
+                        <button
+                          type="button"
+                          className={gd.cargoAddMeeting}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddToMeeting(entry.id);
+                          }}
+                        >
+                          議事録に入れる
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>

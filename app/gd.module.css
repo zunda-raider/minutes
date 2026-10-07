@@ -596,7 +596,6 @@
   background: rgba(8, 6, 12, 0.55);
   color: #f8f1e3;
   font: inherit;
-  cursor: pointer;
 }
 
 .cargoOn {
@@ -957,4 +956,45 @@
   background: rgba(255, 255, 255, 0.03);
   font-size: 0.84rem;
   line-height: 1.45;
+}
+
+
+.cargoSelect {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cargoAddMeeting {
+  appearance: none;
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  border: 1px solid rgba(246, 212, 138, 0.55);
+  background:
+    linear-gradient(180deg, rgba(246, 212, 138, 0.22), rgba(201, 146, 58, 0.1));
+  color: #ffe7a8;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 0.35rem 0.6rem;
+  min-height: 1.65rem;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.cargoAddMeeting:hover {
+  border-color: rgba(255, 231, 168, 0.85);
+  background:
+    linear-gradient(180deg, rgba(246, 212, 138, 0.32), rgba(201, 146, 58, 0.16));
+  color: #fff4d4;
 }
