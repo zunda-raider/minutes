@@ -305,7 +305,7 @@ export default function Home() {
   const [genre, setGenre] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  /** Named meeting notebooks (date + title) with snapshotted cards. */
+  /** Named meeting notebooks (name-first; date optional) with snapshotted cards. */
   const [meetings, setMeetings] = useState<MeetingNotebook[]>([]);
   const [minutesView, setMinutesView] = useState<MinutesView>('list');
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
@@ -313,7 +313,7 @@ export default function Home() {
   const [draftTitle, setDraftTitle] = useState('');
   /** Home card id waiting for 「議事録に入れる」 meeting pick. */
   const [addCardId, setAddCardId] = useState<string | null>(null);
-  /** In the picker: show date+title form instead of picking an existing notebook. */
+  /** In the picker: show name-first create form instead of picking an existing notebook. */
   const [addCreateNew, setAddCreateNew] = useState(false);
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
@@ -1555,10 +1555,10 @@ export default function Home() {
     if (!targetId) {
       const title = draftTitle.trim();
       if (!title) {
-        flashCopyHint('会議タイトルを入力');
+        flashCopyHint('会議名を入力');
         return false;
       }
-      const created = createMeeting(draftDate || todayTokyo(), title);
+      const created = createMeeting(title, draftDate);
       targetId = created.id;
       nextMeetings = [created, ...meetings];
     }
@@ -1589,10 +1589,10 @@ export default function Home() {
   const createEmptyMeeting = () => {
     const title = draftTitle.trim();
     if (!title) {
-      flashCopyHint('会議タイトルを入力');
+      flashCopyHint('会議名を入力');
       return;
     }
-    const created = createMeeting(draftDate || todayTokyo(), title);
+    const created = createMeeting(title, draftDate);
     setMeetings((prev) => [created, ...prev]);
     setActiveMeetingId(created.id);
     setMinutesView('detail');
@@ -2447,25 +2447,31 @@ export default function Home() {
           ) : (
             <>
               <div className={styles.meetingDraftFields}>
-                <label className={styles.meetingField}>
-                  <span>日付</span>
-                  <input
-                    type="date"
-                    className={styles.meetingDateInput}
-                    value={draftDate}
-                    onChange={(e) => setDraftDate(e.target.value)}
-                  />
-                </label>
-                <label className={styles.meetingField}>
-                  <span>タイトル</span>
+                <label className={`${styles.meetingField} ${styles.meetingFieldName}`}>
+                  <span>会議名</span>
                   <input
                     type="text"
                     className={styles.meetingTitleInput}
                     value={draftTitle}
                     onChange={(e) => setDraftTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        archiveCardIntoMeeting(addCardId, null);
+                      }
+                    }}
                     placeholder="人材ミーティング"
                     autoComplete="off"
                     autoFocus
+                  />
+                </label>
+                <label className={`${styles.meetingField} ${styles.meetingFieldDate}`}>
+                  <span>日付（省略可・今日）</span>
+                  <input
+                    type="date"
+                    className={styles.meetingDateInput}
+                    value={draftDate}
+                    onChange={(e) => setDraftDate(e.target.value)}
                   />
                 </label>
               </div>
@@ -2704,28 +2710,35 @@ export default function Home() {
       <section className={styles.meetingCompose}>
         <div className={styles.meetingComposeHead}>
           <h2 className={styles.meetingComposeTitle}>新しい会議</h2>
-          <p className={styles.meetingComposeMeta}>日付とタイトルでノートブックを作成</p>
+          <p className={styles.meetingComposeMeta}>名前を入力して作成（日付は省略可）</p>
         </div>
 
         <div className={styles.meetingDraftFields}>
-          <label className={styles.meetingField}>
-            <span>日付</span>
-            <input
-              type="date"
-              className={styles.meetingDateInput}
-              value={draftDate}
-              onChange={(e) => setDraftDate(e.target.value)}
-            />
-          </label>
-          <label className={styles.meetingField}>
-            <span>タイトル</span>
+          <label className={`${styles.meetingField} ${styles.meetingFieldName}`}>
+            <span>会議名</span>
             <input
               type="text"
               className={styles.meetingTitleInput}
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  createEmptyMeeting();
+                }
+              }}
               placeholder="人材ミーティング"
               autoComplete="off"
+              autoFocus
+            />
+          </label>
+          <label className={`${styles.meetingField} ${styles.meetingFieldDate}`}>
+            <span>日付（省略可・今日）</span>
+            <input
+              type="date"
+              className={styles.meetingDateInput}
+              value={draftDate}
+              onChange={(e) => setDraftDate(e.target.value)}
             />
           </label>
         </div>
@@ -2873,7 +2886,7 @@ export default function Home() {
       minutesView === 'detail' && activeMeeting
         ? `${activeMeeting.entries.length}件`
         : minutesView === 'compose'
-          ? '日付＋タイトル'
+          ? '名前を入力（日付は省略可）'
           : meetings.length > 0
             ? `${meetings.length}件の会議`
             : 'カードから会議へ';
@@ -3071,18 +3084,52 @@ export default function Home() {
               </button>
             </div>
             <nav className={styles.menuNav}>
-              <button
-                type="button"
-                className={`${styles.menuItem} ${styles.menuItemFeatured}`}
-                onClick={openMinutesList}
-              >
-                <span className={styles.menuItemTitle}>議事録ノート</span>
-                <span className={styles.menuItemDesc}>
-                  {meetings.length > 0
-                    ? `${meetings.length}件の会議 · カードから入れる`
-                    : 'カードの「議事録に入れる」で作成'}
-                </span>
-              </button>
+              <div className={styles.menuMeetings}>
+                <button
+                  type="button"
+                  className={`${styles.menuItem} ${styles.menuItemFeatured}`}
+                  onClick={openMinutesList}
+                >
+                  <span className={styles.menuItemTitle}>議事録ノート</span>
+                  <span className={styles.menuItemDesc}>
+                    {meetings.length > 0
+                      ? `${meetings.length}件の会議 · 一覧を開く`
+                      : '名前を付けて会議ノートを作成'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={styles.menuMeetingCreate}
+                  onClick={openNewMeetingCompose}
+                >
+                  ＋ 新しい会議
+                </button>
+                {meetings.length > 0 ? (
+                  <div className={styles.menuMeetingList} role="list">
+                    {meetings.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        role="listitem"
+                        className={styles.menuMeetingItem}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          openMeetingDetail(m.id);
+                        }}
+                      >
+                        <span className={styles.menuMeetingName}>
+                          {meetingDisplayName(m)}
+                        </span>
+                        <span className={styles.menuMeetingCount}>
+                          {m.entries.length}件
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className={styles.menuMeetingEmpty}>まだ会議ノートはありません</p>
+                )}
+              </div>
               <button
                 type="button"
                 className={styles.menuItem}

@@ -39,7 +39,7 @@ assert.equal(
 assert.equal(meetingDisplayName({ date: '2026-10-05', title: '  ' }), '10月5日');
 
 {
-  const base = createMeeting('2026-10-03', '人材ミーティング');
+  const base = createMeeting('人材ミーティング', '2026-10-03');
   const once = appendCardsToMeeting(base, [card('a', 1), card('b', 2)]);
   assert.equal(once.entries.length, 2);
   const twice = appendCardsToMeeting(once, [card('b', 2), card('c', 3)]);
@@ -51,9 +51,9 @@ assert.equal(meetingDisplayName({ date: '2026-10-05', title: '  ' }), '10月5日
 
 {
   const list: MeetingNotebook[] = [
-    { ...createMeeting('2026-10-03', 'A'), createdAt: '2026-10-03T01:00:00.000Z' },
-    { ...createMeeting('2026-10-05', 'B'), createdAt: '2026-10-05T02:00:00.000Z' },
-    { ...createMeeting('2026-10-05', 'C'), createdAt: '2026-10-05T09:00:00.000Z' },
+    { ...createMeeting('A', '2026-10-03'), createdAt: '2026-10-03T01:00:00.000Z' },
+    { ...createMeeting('B', '2026-10-05'), createdAt: '2026-10-05T02:00:00.000Z' },
+    { ...createMeeting('C', '2026-10-05'), createdAt: '2026-10-05T09:00:00.000Z' },
   ];
   const sorted = sortMeetings(list);
   assert.deepEqual(
@@ -87,6 +87,16 @@ assert.equal(meetingDisplayName({ date: '2026-10-05', title: '  ' }), '10月5日
   assert.equal(meetings[0]!.entries.map((e) => e.id).join(','), 'c,d');
   assert.equal(meetings[1]!.title, '人材ミーティング');
   assert.equal(meetings[1]!.entries.map((e) => e.id).join(','), 'a,b');
+}
+
+{
+  const now = new Date('2026-10-07T12:00:00+09:00');
+  const m = createMeeting('週次定例', '', now);
+  assert.equal(m.title, '週次定例');
+  assert.equal(m.date, '2026-10-07');
+  const namedOnly = createMeeting('人材ミーティング');
+  assert.equal(namedOnly.title, '人材ミーティング');
+  assert.equal(namedOnly.date, todayTokyo());
 }
 
 console.log('meeting-notebooks ok');

@@ -2490,8 +2490,19 @@
 
 .meetingDraftFields {
   display: grid;
-  grid-template-columns: minmax(8rem, 11rem) 1fr;
+  grid-template-columns: 1fr minmax(8rem, 11rem);
   gap: 0.65rem;
+  align-items: end;
+}
+
+.meetingFieldName {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.meetingFieldDate {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .meetingField {
@@ -2555,6 +2566,12 @@
 @media (max-width: 560px) {
   .meetingDraftFields {
     grid-template-columns: 1fr;
+  }
+
+  .meetingFieldName,
+  .meetingFieldDate {
+    grid-column: 1;
+    grid-row: auto;
   }
 }
 
@@ -2635,4 +2652,91 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+/* Hamburger — 議事録ノート list / open */
+.menuMeetings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.15rem 0 0.35rem;
+}
+
+.menuMeetingCreate {
+  appearance: none;
+  align-self: stretch;
+  height: 2.2rem;
+  padding: 0 0.85rem;
+  border-radius: 8px;
+  border: 1px solid rgba(246, 212, 138, 0.55);
+  background: linear-gradient(180deg, rgba(246, 212, 138, 0.2), rgba(201, 146, 58, 0.08));
+  color: #ffe7a8;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 241, 196, 0.14);
+}
+
+.menuMeetingCreate:hover {
+  border-color: rgba(255, 231, 168, 0.85);
+  background: linear-gradient(180deg, rgba(246, 212, 138, 0.3), rgba(201, 146, 58, 0.14));
+}
+
+.menuMeetingList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 12.5rem;
+  overflow: auto;
+  padding: 0.15rem;
+  border-radius: 8px;
+  border: 1px solid rgba(246, 212, 138, 0.18);
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.menuMeetingItem {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #f3e6c8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuMeetingItem:hover {
+  border-color: rgba(246, 212, 138, 0.4);
+  background: rgba(246, 212, 138, 0.08);
+  color: #ffe7a8;
+}
+
+.menuMeetingName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuMeetingCount {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.menuMeetingEmpty {
+  margin: 0;
+  padding: 0.35rem 0.55rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
