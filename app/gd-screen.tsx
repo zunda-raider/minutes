@@ -326,7 +326,7 @@ export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting 
                             onAddToMeeting(entry.id);
                           }}
                         >
-                          議事録に入れる
+                          議事録に入れる／保存
                         </button>
                       )}
                     </div>

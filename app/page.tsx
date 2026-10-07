@@ -311,7 +311,7 @@ export default function Home() {
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [draftDate, setDraftDate] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
-  /** Home card id waiting for 「議事録に入れる」 meeting pick. */
+  /** Home card id waiting for 「議事録に入れる／保存」 meeting pick. */
   const [addCardId, setAddCardId] = useState<string | null>(null);
   /** In the picker: show name-first create form instead of picking an existing notebook. */
   const [addCreateNew, setAddCreateNew] = useState(false);
@@ -2101,14 +2101,14 @@ export default function Home() {
           <button
             type="button"
             className={styles.entryAddToMeeting}
-            aria-label="議事録に入れる"
+            aria-label="議事録に入れる／保存"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               openAddToMeeting(entry.id);
             }}
           >
-            議事録に入れる
+            議事録に入れる／保存
           </button>
           <button
             type="button"
@@ -2336,11 +2336,11 @@ export default function Home() {
           className={styles.addMeetingModal}
           role="dialog"
           aria-modal="true"
-          aria-label="議事録に入れる"
+          aria-label="議事録に入れる／保存"
         >
           <div className={styles.addMeetingHeader}>
             <div>
-              <h2 className={styles.addMeetingTitle}>議事録に入れる</h2>
+              <h2 className={styles.addMeetingTitle}>議事録に入れる／保存</h2>
               <p className={styles.addMeetingMeta}>
                 {card ? `#${formatNote(card.note)}` : ''}
                 {preview ? ` · ${preview}` : ''}
@@ -2935,6 +2935,7 @@ export default function Home() {
     <div className={`${styles.app} ${styles.homeScreen}`}>
       <div className={styles.bgGlow} aria-hidden="true" />
       {renderTranslateModal()}
+      {renderAddToMeetingModal()}
 
       <header className={styles.topBar}>
         <button
@@ -3034,18 +3035,16 @@ export default function Home() {
             </div>
             <nav className={styles.menuNav}>
               <div className={styles.menuMeetings}>
-                <button
-                  type="button"
-                  className={`${styles.menuItem} ${styles.menuItemFeatured}`}
-                  onClick={openMinutesList}
-                >
-                  <span className={styles.menuItemTitle}>議事録ノート</span>
-                  <span className={styles.menuItemDesc}>
-                    {meetings.length > 0
-                      ? `${meetings.length}件の会議 · 一覧を開く`
-                      : '名前を付けて会議ノートを作成'}
-                  </span>
-                </button>
+                <div className={styles.menuMeetingsHeader}>
+                  <span className={styles.menuMeetingsLabel}>各回の議事録</span>
+                  <button
+                    type="button"
+                    className={styles.menuMeetingsAll}
+                    onClick={openMinutesList}
+                  >
+                    一覧
+                  </button>
+                </div>
                 <button
                   type="button"
                   className={styles.menuMeetingCreate}
@@ -3054,7 +3053,7 @@ export default function Home() {
                   ＋ 新しい会議
                 </button>
                 {meetings.length > 0 ? (
-                  <div className={styles.menuMeetingList} role="list">
+                  <div className={styles.menuMeetingList} role="list" aria-label="各回の議事録">
                     {meetings.map((m) => (
                       <button
                         key={m.id}
@@ -3076,7 +3075,9 @@ export default function Home() {
                     ))}
                   </div>
                 ) : (
-                  <p className={styles.menuMeetingEmpty}>まだ会議ノートはありません</p>
+                  <p className={styles.menuMeetingEmpty}>
+                    まだありません · カードの「議事録に入れる／保存」で作成
+                  </p>
                 )}
               </div>
               <button
