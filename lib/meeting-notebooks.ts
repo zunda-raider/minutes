@@ -1,6 +1,6 @@
 /**
  * Named meeting notebooks — archive transcript cards by hand
- * (date + title), not an LLM summary.
+ * (name-first; date optional / defaults to today), not an LLM summary.
  *
  * Per-card 「議事録に入れる」 snapshots a card into a named meeting
  * (mic / Zoom / GD harbor alike) so it leaves Home without losing the notebook.
@@ -149,9 +149,10 @@ export function saveActiveMeetingId(id: string | null): void {
   }
 }
 
+/** Name-first create; date omitted → Asia/Tokyo today. */
 export function createMeeting(
-  date: string,
   title: string,
+  date: string = '',
   now: Date = new Date()
 ): MeetingNotebook {
   const ymd = date.trim() || todayTokyo(now);
