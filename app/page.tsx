@@ -40,14 +40,17 @@ import { mergeSelectedCards } from '@/lib/merge-entries';
 import { coalesceHomeCaptureChunks } from '@/lib/coalesce-home-chunks';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import {
-  clearStoredMinutesBlocks,
-  entriesInBlock,
-  loadMinutesBlocks,
-  makeNextBlock,
-  saveMinutesBlocks,
-  ungroupedEntries,
-  type MinutesBlock,
-} from '@/lib/minutes-blocks';
+  appendCardsToMeeting,
+  createMeeting,
+  formatMeetingDateLabel,
+  loadActiveMeetingId,
+  loadMeetingsWithMigration,
+  meetingDisplayName,
+  saveActiveMeetingId,
+  saveMeetings,
+  todayTokyo,
+  type MeetingNotebook,
+} from '@/lib/meeting-notebooks';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -114,6 +117,9 @@ type TranscriptEntry = {
 
 
 type Screen = 'home' | 'note1' | 'note2' | 'minutes' | 'gd';
+
+/** list = notebooks; compose = save Home cards; detail = one meeting */
+type MinutesView = 'list' | 'compose' | 'detail';
 
 type TranslateResultItem = {
   id: string;
@@ -299,9 +305,14 @@ export default function Home() {
   const [genre, setGenre] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  /** 議事録をまとめる — numbered note blocks #1, #2, … */
-  const [minutesBlocks, setMinutesBlocks] = useState<MinutesBlock[]>([]);
-  const [titlingIds, setTitlingIds] = useState<Set<string>>(() => new Set());
+  /** Named meeting notebooks (date + title) with snapshotted cards. */
+  const [meetings, setMeetings] = useState<MeetingNotebook[]>([]);
+  const [minutesView, setMinutesView] = useState<MinutesView>('list');
+  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  /** Compose target: existing id, or null = create new from draft fields. */
+  const [saveTargetId, setSaveTargetId] = useState<string | null>(null);
+  const [draftDate, setDraftDate] = useState('');
+  const [draftTitle, setDraftTitle] = useState('');
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
@@ -455,11 +466,13 @@ export default function Home() {
 
   // Hydrate transcript history + summary from localStorage (client only)
   useEffect(() => {
-    setEntries(loadEntries());
+    const stored = loadEntries();
+    setEntries(stored);
     setSummary(loadSummary());
     setGenre(loadGenre());
     setSpeakerLabels(loadSpeakerLabels());
-    setMinutesBlocks(loadMinutesBlocks());
+    setMeetings(loadMeetingsWithMigration(stored));
+    setActiveMeetingId(loadActiveMeetingId());
     const mode = loadSpeakerMode();
     setSpeakerMode(mode);
     speakerModeRef.current = mode;
@@ -479,8 +492,13 @@ export default function Home() {
 
   useEffect(() => {
     if (!historyReady) return;
-    saveMinutesBlocks(minutesBlocks);
-  }, [minutesBlocks, historyReady]);
+    saveMeetings(meetings);
+  }, [meetings, historyReady]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+    saveActiveMeetingId(activeMeetingId);
+  }, [activeMeetingId, historyReady]);
 
   useEffect(() => {
     if (!historyReady) return;
@@ -1355,9 +1373,13 @@ export default function Home() {
     void copySelection('__since__', newer, '新しい発言なし');
   };
 
-  const pendingMinutes = ungroupedEntries(entries, minutesBlocks);
-  const nextBlockNo =
-    minutesBlocks.reduce((max, b) => Math.max(max, b.index), 0) + 1;
+  /** Selected Home cards if any, else the whole Home feed — hand-sorted archive source. */
+  const cardsToArchive =
+    selectedIds.size > 0
+      ? entries.filter((e) => selectedIds.has(e.id)).sort((a, b) => a.note - b.note)
+      : [...entries].sort((a, b) => a.note - b.note);
+  const activeMeeting =
+    meetings.find((m) => m.id === activeMeetingId) ?? null;
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
   // Home only: newer segments on top, split pieces of one segment still read downward.
@@ -1379,8 +1401,6 @@ export default function Home() {
     clearStoredEntries();
     clearStoredSummary();
     clearStoredSpeakerLabels();
-    setMinutesBlocks([]);
-    clearStoredMinutesBlocks();
     void clearAllAudio().catch((err) => console.error('audio clear failed:', err));
   };
 
@@ -1476,63 +1496,137 @@ export default function Home() {
     // Stay anchored to the chip — do not scroll the page away from the toggle.
   };
 
-  /** Best-effort Ollama heading for a block. Silent on failure. */
-  const requestBlockTitle = async (block: MinutesBlock, items: TranscriptEntry[]) => {
-    if (items.length === 0) return;
-    setTitlingIds((prev) => new Set(prev).add(block.id));
-    try {
-      const res = await fetch('/api/minutes-title', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: items.map(formatEntryForCopy).join('\n\n'),
-          genre: genre.trim() || undefined,
-        }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { title?: string };
-      const title = data.title?.trim();
-      if (!title) return;
-      setMinutesBlocks((prev) =>
-        prev.map((b) => (b.id === block.id ? { ...b, title } : b))
-      );
-    } catch {
-      // Ollama is optional; keep the plain #N heading.
-    } finally {
-      setTitlingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(block.id);
-        return next;
-      });
-    }
+  const openMinutesList = () => {
+    setMenuOpen(false);
+    setMinutesView('list');
+    setScreen('minutes');
+  };
+
+  const openMeetingDetail = (id: string) => {
+    setActiveMeetingId(id);
+    setMinutesView('detail');
+    setScreen('minutes');
+  };
+
+  /** Open compose: pick/create a named meeting, then archive Home cards into it. */
+  const openSaveCompose = () => {
+    setMenuOpen(false);
+    setDraftDate(todayTokyo());
+    setDraftTitle('');
+    setSaveTargetId(activeMeetingId ?? meetings[0]?.id ?? null);
+    setMinutesView('compose');
+    setScreen('minutes');
+  };
+
+  const openNewMeetingCompose = () => {
+    setMenuOpen(false);
+    setDraftDate(todayTokyo());
+    setDraftTitle('');
+    setSaveTargetId(null);
+    setMinutesView('compose');
+    setScreen('minutes');
+  };
+
+  const removeArchivedFromHome = (archivedIds: Set<string>) => {
+    setEntries((prev) => prev.filter((e) => !archivedIds.has(e.id)));
+    setSelectedIds((prev) => {
+      const next = new Set([...prev].filter((id) => !archivedIds.has(id)));
+      return next;
+    });
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
   };
 
   /**
-   * 議事録をまとめる — cards since the last grouping become the next block #N.
-   * Works without Ollama; a short heading is added when Ollama answers.
+   * Archive current (or selected) Home cards into a named meeting notebook.
+   * Returns the meeting id, or null when nothing to save / invalid draft.
    */
-  const groupMinutes = () => {
-    setMenuOpen(false);
-    const block = makeNextBlock(entries, minutesBlocks);
-    setScreen('minutes');
-    if (!block) {
-      flashCopyHint(entries.length === 0 ? 'まとめる発言がありません' : '新しい発言なし');
+  const archiveIntoMeeting = (opts: {
+    clearHome: boolean;
+    startNext?: boolean;
+  }): string | null => {
+    if (cardsToArchive.length === 0) {
+      flashCopyHint(entries.length === 0 ? 'まとめる発言がありません' : '選択中の発言がありません');
+      return null;
+    }
+
+    let meetingId = saveTargetId;
+    let nextMeetings = meetings;
+
+    if (!meetingId) {
+      const title = draftTitle.trim();
+      if (!title) {
+        flashCopyHint('会議タイトルを入力');
+        return null;
+      }
+      const created = createMeeting(draftDate || todayTokyo(), title);
+      meetingId = created.id;
+      nextMeetings = [created, ...meetings];
+    }
+
+    const target = nextMeetings.find((m) => m.id === meetingId);
+    if (!target) {
+      flashCopyHint('会議が見つかりません');
+      return null;
+    }
+
+    const updated = appendCardsToMeeting(target, cardsToArchive);
+    nextMeetings = nextMeetings.map((m) => (m.id === meetingId ? updated : m));
+    setMeetings(nextMeetings);
+    setActiveMeetingId(meetingId);
+
+    const archivedIds = new Set(cardsToArchive.map((e) => e.id));
+    if (opts.clearHome || opts.startNext) {
+      removeArchivedFromHome(archivedIds);
+      // Full clear of Home feed → reset note counter for the next meeting.
+      if (entries.every((e) => archivedIds.has(e.id))) {
+        entriesLenRef.current = 0;
+      }
+    } else {
+      removeArchivedFromHome(archivedIds);
+    }
+
+    flashCopyHint(`${cardsToArchive.length}件を保存`);
+
+    if (opts.startNext) {
+      setDraftDate(todayTokyo());
+      setDraftTitle('');
+      setSaveTargetId(null);
+      setMinutesView('compose');
+    } else {
+      setMinutesView('detail');
+    }
+    return meetingId;
+  };
+
+  /** Create an empty named notebook (no cards required). */
+  const createEmptyMeeting = () => {
+    const title = draftTitle.trim();
+    if (!title) {
+      flashCopyHint('会議タイトルを入力');
       return;
     }
-    setMinutesBlocks((prev) => [...prev, block]);
-    void requestBlockTitle(block, entriesInBlock(entries, block));
+    const created = createMeeting(draftDate || todayTokyo(), title);
+    setMeetings((prev) => [created, ...prev]);
+    setActiveMeetingId(created.id);
+    setSaveTargetId(created.id);
+    setMinutesView('detail');
+    flashCopyHint(meetingDisplayName(created));
   };
 
-  /** Undo the newest block only, so ranges stay contiguous. */
-  const ungroupLastBlock = (id: string) => {
-    setMinutesBlocks((prev) => {
-      const last = prev[prev.length - 1];
-      return last && last.id === id ? prev.slice(0, -1) : prev;
-    });
+  const deleteMeeting = (id: string) => {
+    setMeetings((prev) => prev.filter((m) => m.id !== id));
+    if (activeMeetingId === id) setActiveMeetingId(null);
+    setMinutesView('list');
   };
 
-  const copyBlock = (block: MinutesBlock) => {
-    void copySelection(`__blk_${block.id}__`, entriesInBlock(entries, block), '発言なし');
+  const copyMeeting = (meeting: MeetingNotebook) => {
+    void copySelection(
+      `__mtg_${meeting.id}__`,
+      meeting.entries as TranscriptEntry[],
+      '発言なし'
+    );
   };
 
   const toggleSummaryPanel = () => {
@@ -2469,7 +2563,272 @@ export default function Home() {
   };
 
   const renderMinutesScreen = () => {
-    const lastId = minutesBlocks[minutesBlocks.length - 1]?.id;
+    const composeTarget =
+      saveTargetId != null
+        ? meetings.find((m) => m.id === saveTargetId) ?? null
+        : null;
+
+    const renderCompose = () => (
+      <section className={styles.meetingCompose}>
+        <div className={styles.meetingComposeHead}>
+          <h2 className={styles.meetingComposeTitle}>この会議に保存</h2>
+          <p className={styles.meetingComposeMeta}>
+            {cardsToArchive.length > 0
+              ? selectedIds.size > 0
+                ? `選択 ${cardsToArchive.length}件`
+                : `Home ${cardsToArchive.length}件`
+              : '保存する発言がありません'}
+          </p>
+        </div>
+
+        <div className={styles.meetingTargetList} role="listbox" aria-label="保存先の会議">
+          <button
+            type="button"
+            role="option"
+            aria-selected={saveTargetId == null}
+            className={`${styles.meetingTarget} ${saveTargetId == null ? styles.meetingTargetActive : ''}`}
+            onClick={() => setSaveTargetId(null)}
+          >
+            ＋ 新しい会議
+          </button>
+          {meetings.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="option"
+              aria-selected={saveTargetId === m.id}
+              className={`${styles.meetingTarget} ${saveTargetId === m.id ? styles.meetingTargetActive : ''}`}
+              onClick={() => setSaveTargetId(m.id)}
+            >
+              <span className={styles.meetingTargetName}>{meetingDisplayName(m)}</span>
+              <span className={styles.meetingTargetCount}>{m.entries.length}件</span>
+            </button>
+          ))}
+        </div>
+
+        {saveTargetId == null && (
+          <div className={styles.meetingDraftFields}>
+            <label className={styles.meetingField}>
+              <span>日付</span>
+              <input
+                type="date"
+                className={styles.meetingDateInput}
+                value={draftDate}
+                onChange={(e) => setDraftDate(e.target.value)}
+              />
+            </label>
+            <label className={styles.meetingField}>
+              <span>タイトル</span>
+              <input
+                type="text"
+                className={styles.meetingTitleInput}
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                placeholder="人材ミーティング"
+                autoComplete="off"
+              />
+            </label>
+          </div>
+        )}
+
+        {composeTarget && (
+          <p className={styles.meetingComposeMeta}>
+            保存先: {meetingDisplayName(composeTarget)}
+          </p>
+        )}
+
+        <div className={styles.meetingComposeActions}>
+          <button
+            type="button"
+            className={styles.minutesSummaryButton}
+            disabled={cardsToArchive.length === 0}
+            onClick={() => archiveIntoMeeting({ clearHome: true })}
+          >
+            この会議に保存
+          </button>
+          <button
+            type="button"
+            className={styles.ghostButton}
+            disabled={cardsToArchive.length === 0}
+            onClick={() => archiveIntoMeeting({ clearHome: true, startNext: true })}
+          >
+            次の会議を開始
+          </button>
+          {saveTargetId == null && (
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={createEmptyMeeting}
+            >
+              会議だけ作成
+            </button>
+          )}
+          <button
+            type="button"
+            className={styles.ghostButton}
+            onClick={() => setMinutesView('list')}
+          >
+            一覧へ
+          </button>
+        </div>
+      </section>
+    );
+
+    const renderList = () => (
+      <>
+        <div className={styles.minutesToolbar}>
+          <button
+            type="button"
+            className={styles.minutesSummaryButton}
+            onClick={openSaveCompose}
+            disabled={!historyReady}
+          >
+            まとめる
+            {cardsToArchive.length > 0 && (
+              <span className={styles.minutesPendingBadge}>{cardsToArchive.length}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            className={styles.ghostButton}
+            onClick={openNewMeetingCompose}
+          >
+            ＋ 新しい会議
+          </button>
+          {copyHint ? (
+            <span className={styles.copyHint} role="status">
+              {copyHint}
+            </span>
+          ) : null}
+        </div>
+
+        {meetings.length === 0 ? (
+          <div className={styles.emptyState}>
+            <div className={styles.emptyOrb} aria-hidden="true" />
+            <h3 className={styles.emptyTitle}>会議ノートはまだありません</h3>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={openSaveCompose}
+            >
+              まとめる
+            </button>
+          </div>
+        ) : (
+          <ol className={styles.minutesBlockList}>
+            {meetings.map((m) => (
+              <li key={m.id} className={styles.minutesBlock}>
+                <button
+                  type="button"
+                  className={styles.meetingRowButton}
+                  onClick={() => openMeetingDetail(m.id)}
+                >
+                  <span className={styles.minutesBlockNo}>
+                    {formatMeetingDateLabel(m.date)}
+                  </span>
+                  <div className={styles.minutesBlockHeading}>
+                    <h3 className={styles.minutesBlockTitle}>
+                      {m.title.trim() || '（無題）'}
+                    </h3>
+                    <p className={styles.minutesBlockMeta}>{m.entries.length}件</p>
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </>
+    );
+
+    const renderDetail = () => {
+      if (!activeMeeting) {
+        return (
+          <div className={styles.emptyState}>
+            <h3 className={styles.emptyTitle}>会議が見つかりません</h3>
+            <button
+              type="button"
+              className={styles.recordButton}
+              onClick={() => setMinutesView('list')}
+            >
+              一覧へ
+            </button>
+          </div>
+        );
+      }
+      const items = activeMeeting.entries;
+      return (
+        <>
+          <div className={styles.minutesToolbar}>
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={() => setMinutesView('list')}
+            >
+              一覧
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButton}
+              onClick={() => copyMeeting(activeMeeting)}
+              disabled={items.length === 0}
+            >
+              {copiedId === `__mtg_${activeMeeting.id}__` ? 'コピー済み' : 'コピー'}
+            </button>
+            <button
+              type="button"
+              className={styles.minutesSummaryButton}
+              onClick={() => {
+                setSaveTargetId(activeMeeting.id);
+                setMinutesView('compose');
+              }}
+            >
+              この会議に保存
+              {cardsToArchive.length > 0 && (
+                <span className={styles.minutesPendingBadge}>{cardsToArchive.length}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={styles.ghostButtonDanger}
+              onClick={() => deleteMeeting(activeMeeting.id)}
+            >
+              削除
+            </button>
+            {copyHint ? (
+              <span className={styles.copyHint} role="status">
+                {copyHint}
+              </span>
+            ) : null}
+          </div>
+          {items.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyOrb} aria-hidden="true" />
+              <h3 className={styles.emptyTitle}>まだカードがありません</h3>
+            </div>
+          ) : (
+            <ol className={styles.minutesLines}>{items.map(renderMinutesLine)}</ol>
+          )}
+        </>
+      );
+    };
+
+    const heading =
+      minutesView === 'detail' && activeMeeting
+        ? meetingDisplayName(activeMeeting)
+        : minutesView === 'compose'
+          ? 'まとめる'
+          : '議事録ノート';
+    const sub =
+      minutesView === 'detail' && activeMeeting
+        ? `${activeMeeting.entries.length}件`
+        : minutesView === 'compose'
+          ? cardsToArchive.length > 0
+            ? `${cardsToArchive.length}件を保存`
+            : '会議を選ぶ'
+          : meetings.length > 0
+            ? `${meetings.length}件の会議`
+            : '会議ごとに整理';
+
     return (
       <div className={styles.app}>
         <div className={styles.bgGlow} aria-hidden="true" />
@@ -2484,10 +2843,8 @@ export default function Home() {
             Home
           </button>
           <div className={styles.noteHeading}>
-            <h1 className={styles.title}>議事録ノート</h1>
-            <p className={styles.subtitle}>
-              {minutesBlocks.length > 0 ? `#1 – #${minutesBlocks.length}` : 'まだブロックなし'}
-            </p>
+            <h1 className={styles.title}>{heading}</h1>
+            <p className={styles.subtitle}>{sub}</p>
           </div>
           <div className={styles.topMeta}>
             <StopShareButton />
@@ -2502,102 +2859,11 @@ export default function Home() {
         )}
 
         <section className={styles.feed}>
-          <div className={styles.minutesToolbar}>
-            <button
-              type="button"
-              className={styles.minutesSummaryButton}
-              onClick={groupMinutes}
-              disabled={pendingMinutes.length === 0}
-            >
-              {pendingMinutes.length > 0
-                ? `議事録をまとめる → #${nextBlockNo}（${pendingMinutes.length}件）`
-                : '議事録をまとめる'}
-            </button>
-            {copyHint ? (
-              <span className={styles.copyHint} role="status">
-                {copyHint}
-              </span>
-            ) : null}
-          </div>
-
-          {minutesBlocks.length === 0 && pendingMinutes.length === 0 ? (
-            <div className={styles.emptyState}>
-              <div className={styles.emptyOrb} aria-hidden="true" />
-              <h3 className={styles.emptyTitle}>まだ発言がありません</h3>
-              <button
-                type="button"
-                className={styles.recordButton}
-                onClick={() => setScreen('home')}
-              >
-                Homeへ
-              </button>
-            </div>
-          ) : (
-            <ol className={styles.minutesBlockList}>
-              {minutesBlocks.map((block) => {
-                const items = entriesInBlock(entries, block);
-                const first = items[0];
-                const last = items[items.length - 1];
-                const range =
-                  first && last
-                    ? `${formatClock(first.at)} – ${formatClock(last.at)}`
-                    : '';
-                return (
-                  <li key={block.id} className={styles.minutesBlock}>
-                    <div className={styles.minutesBlockHead}>
-                      <span className={styles.minutesBlockNo}>#{block.index}</span>
-                      <div className={styles.minutesBlockHeading}>
-                        <h3 className={styles.minutesBlockTitle}>
-                          {block.title ||
-                            (titlingIds.has(block.id) ? '見出し生成中…' : range || '（空）')}
-                        </h3>
-                        <p className={styles.minutesBlockMeta}>
-                          {block.title && range ? `${range} · ` : ''}
-                          {items.length}件
-                        </p>
-                      </div>
-                      <div className={styles.minutesBlockActions}>
-                        <button
-                          type="button"
-                          className={styles.ghostButton}
-                          onClick={() => copyBlock(block)}
-                          disabled={items.length === 0}
-                        >
-                          {copiedId === `__blk_${block.id}__` ? 'コピー済み' : 'コピー'}
-                        </button>
-                        {block.id === lastId && (
-                          <button
-                            type="button"
-                            className={styles.ghostButton}
-                            onClick={() => ungroupLastBlock(block.id)}
-                          >
-                            解除
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    {items.length > 0 && (
-                      <ol className={styles.minutesLines}>{items.map(renderMinutesLine)}</ol>
-                    )}
-                  </li>
-                );
-              })}
-              {pendingMinutes.length > 0 && (
-                <li className={`${styles.minutesBlock} ${styles.minutesBlockPending}`}>
-                  <div className={styles.minutesBlockHead}>
-                    <span className={styles.minutesBlockNo}>#{nextBlockNo}</span>
-                    <div className={styles.minutesBlockHeading}>
-                      <h3 className={styles.minutesBlockTitle}>未まとめ</h3>
-                      <p className={styles.minutesBlockMeta}>{pendingMinutes.length}件</p>
-                    </div>
-                  </div>
-                  <ol className={styles.minutesLines}>
-                    {pendingMinutes.map(renderMinutesLine)}
-                  </ol>
-                </li>
-              )}
-            </ol>
-          )}
+          {minutesView === 'compose'
+            ? renderCompose()
+            : minutesView === 'detail'
+              ? renderDetail()
+              : renderList()}
         </section>
       </div>
     );
@@ -2655,13 +2921,17 @@ export default function Home() {
         <button
           type="button"
           className={styles.minutesSummaryButton}
-          onClick={groupMinutes}
+          onClick={openSaveCompose}
           disabled={!historyReady}
-          title={`未まとめ ${pendingMinutes.length}件 → #${nextBlockNo}`}
+          title={
+            cardsToArchive.length > 0
+              ? `${cardsToArchive.length}件を会議ノートへ`
+              : '会議ノートにまとめる'
+          }
         >
-          議事録をまとめる
-          {pendingMinutes.length > 0 && (
-            <span className={styles.minutesPendingBadge}>{pendingMinutes.length}</span>
+          まとめる
+          {cardsToArchive.length > 0 && (
+            <span className={styles.minutesPendingBadge}>{cardsToArchive.length}</span>
           )}
         </button>
         <div className={styles.brand}>
@@ -2705,9 +2975,9 @@ export default function Home() {
           <button
             type="button"
             className={styles.noteEntryButton}
-            onClick={() => setScreen('minutes')}
+            onClick={openMinutesList}
           >
-            議事録ノート{minutesBlocks.length > 0 ? ` · #${minutesBlocks.length}` : ''}
+            議事録ノート{meetings.length > 0 ? ` · ${meetings.length}` : ''}
           </button>
         </div>
         <div className={styles.statusGenreRow}>
@@ -2750,13 +3020,27 @@ export default function Home() {
               <button
                 type="button"
                 className={`${styles.menuItem} ${styles.menuItemFeatured}`}
-                onClick={groupMinutes}
+                onClick={openSaveCompose}
               >
-                <span className={styles.menuItemTitle}>議事録をまとめる</span>
+                <span className={styles.menuItemTitle}>まとめる</span>
                 <span className={styles.menuItemDesc}>
-                  {pendingMinutes.length > 0
-                    ? `未まとめ ${pendingMinutes.length}件 → #${nextBlockNo}`
-                    : `議事録ノート（${minutesBlocks.length}ブロック）`}
+                  {cardsToArchive.length > 0
+                    ? `${cardsToArchive.length}件を会議ノートへ`
+                    : meetings.length > 0
+                      ? `会議ノート（${meetings.length}件）`
+                      : '日付＋タイトルで保存'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.menuItem}
+                onClick={openMinutesList}
+              >
+                <span className={styles.menuItemTitle}>議事録ノート</span>
+                <span className={styles.menuItemDesc}>
+                  {meetings.length > 0
+                    ? `${meetings.length}件の会議`
+                    : '会議一覧を開く'}
                 </span>
               </button>
               <button
