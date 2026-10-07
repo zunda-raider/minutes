@@ -12,7 +12,7 @@ export type StoredTranscriptEntry = {
   textJa?: string;
   /** 1-based speaker id when known / assigned */
   speakerId?: number;
-  /** Recording source when known. Mic id 2 is 質問者; Zoom id 2 is セミナー. */
+  /** Recording source when known. Id 2 is セミナー for mic and Zoom. */
   source?: 'mic' | 'system';
 };
 

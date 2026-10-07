@@ -111,7 +111,7 @@ type TranscriptEntry = {
   textJa?: string;
   /** 1-based speaker id */
   speakerId?: number;
-  /** mic vs Zoom/system, so meta labels can tell 質問者 from セミナー */
+  /** mic vs Zoom/system (same 自分 / セミナー / それ以外 buckets). */
   source?: 'mic' | 'system';
 };
 
@@ -177,9 +177,9 @@ function isEnglishEntry(entry: TranscriptEntry): boolean {
   return entry.lang === 'en' || entry.lang.startsWith('en-');
 }
 
-/** Zoom speaker B. Mic id 2 is 質問者, not セミナー. */
+/** Speaker B — セミナー (mic and Zoom). */
 function isSeminarUtterance(entry: TranscriptEntry): boolean {
-  return entry.speakerId === 2 && entry.source !== 'mic';
+  return entry.speakerId === SEMINAR_SPEAKER_ID;
 }
 
 /** Speaker A (自分) plus C–G (それ以外 and leftover letters). Excludes B and unlabeled. */
@@ -321,8 +321,8 @@ export default function Home() {
   const [autoAssignBusy, setAutoAssignBusy] = useState(false);
   const [audioIds, setAudioIds] = useState<Set<string>>(() => new Set());
   const [audioBusyId, setAudioBusyId] = useState<string | null>(null);
-  /** Active speaker while recording (Zoom A–G or mic role). Optional; sort afterward. */
-  const [activeSpeakerId, setActiveSpeakerId] = useState<number>(1);
+  /** Active speaker while recording (Zoom A–G or mic role). Defaults to セミナー. */
+  const [activeSpeakerId, setActiveSpeakerId] = useState<number>(SEMINAR_SPEAKER_ID);
   /** Cards chosen for post-hoc 自分 / セミナー / それ以外. */
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   /** Ids waiting for a second click to confirm delete. */
@@ -363,7 +363,7 @@ export default function Home() {
   /** Legacy parallel-mic slot (Home Zoom no longer opens it for auto-自分). */
   const micStreamRef = useRef<MediaStream | null>(null);
   const micRecorderRef = useRef<MediaRecorder | null>(null);
-  /** User picked a Zoom speaker during the current segment (overrides energy). */
+  /** User explicitly picked a speaker during the current segment (mic or Zoom). */
   const segmentManualRef = useRef(false);
   const chunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef('audio/webm');
@@ -554,13 +554,9 @@ export default function Home() {
 
   useEffect(() => {
     audioSourceRef.current = audioSource;
-    if (audioSource === 'system') {
-      // Zoom / seminar: default unmarked speech to セミナー; 自分 is explicit only.
-      setActiveSpeakerId(SEMINAR_SPEAKER_ID);
-    } else {
-      // Mic only uses roles 1–2; clamp if switching from Zoom A–G
-      setActiveSpeakerId((cur) => (cur > 2 ? 1 : cur));
-    }
+    // Mic and Zoom: unmarked speech defaults to セミナー; 自分 only on explicit pick.
+    setActiveSpeakerId(SEMINAR_SPEAKER_ID);
+    segmentManualRef.current = false;
   }, [audioSource]);
 
   useEffect(() => {
@@ -679,8 +675,7 @@ export default function Home() {
 
         let chunks: Array<{ speaker?: number; text: string }> = [];
 
-        // Home Zoom seminar: do not auto-tag 自分 from parallel-mic energy.
-        // Unmarked / auto speech becomes セミナー; 自分 only via explicit pick (manualLock).
+        // Unmarked / auto speech → セミナー; 自分 only via explicit pick (manualLock).
         if (mode === 'auto' && hasWhisperDiarize) {
           const { turns, lastSpeaker } = remapSpeakersContinuity(
             data.turns!,
@@ -731,14 +726,14 @@ export default function Home() {
         // One Home capture ≈ HOME_SEGMENT_MS; do not keep Whisper-fine cards.
         chunks = coalesceHomeCaptureChunks(chunks);
 
-        if (job.source === 'system' && !job.manualLock) {
-          // Zoom seminar: unmarked → セミナー. Auto diarize/pitch must not
-          // surface 自分; keep an explicit picker selection (manual stamp).
+        if (!job.manualLock) {
+          // Mic + Zoom: unmarked → セミナー. Sticky picker / auto 自分 must not
+          // win without an explicit pick in this segment (manualLock).
           if (mode === 'manual') {
-            const fallback = job.speakerId ?? SEMINAR_SPEAKER_ID;
-            chunks = chunks.map((row) =>
-              row.speaker == null ? { ...row, speaker: fallback } : row
-            );
+            chunks = chunks.map((row) => ({
+              ...row,
+              speaker: SEMINAR_SPEAKER_ID,
+            }));
           } else {
             chunks = chunks.map((row) => {
               if (row.speaker == null || row.speaker === SELF_SPEAKER_ID) {
@@ -828,9 +823,9 @@ export default function Home() {
         blob,
         speakerId: activeSpeakerRef.current,
         source,
-        // Energy comparison is Zoom/system only.
+        // Energy comparison is Zoom/system only (legacy; Home no longer auto-自分).
         micBlob: source === 'system' ? extra?.micBlob ?? null : null,
-        manualLock: source === 'system' ? Boolean(extra?.manualLock) : false,
+        manualLock: Boolean(extra?.manualLock),
       });
       setPendingCount((n) => n + 1);
       void processQueue();
@@ -885,7 +880,10 @@ export default function Home() {
       micSlice?.release();
     }
     micRecorderRef.current = micRecorder;
+    // Each new cut starts unmarked → セミナー until the user picks again.
     segmentManualRef.current = false;
+    setActiveSpeakerId(SEMINAR_SPEAKER_ID);
+    activeSpeakerRef.current = SEMINAR_SPEAKER_ID;
 
     let systemBlob: Blob | null = null;
     let micBlob: Blob | null = null;
@@ -1226,10 +1224,8 @@ export default function Home() {
     }
   };
 
-  const chooseZoomSpeaker = (id: number) => {
-    if (audioSourceRef.current === 'system') {
-      segmentManualRef.current = true;
-    }
+  const chooseSpeaker = (id: number) => {
+    segmentManualRef.current = true;
     setActiveSpeakerId(id);
   };
 
@@ -1336,7 +1332,7 @@ export default function Home() {
     void copySelection('__all__', entries, 'コピーする発言がありません');
   };
 
-  /** セミナーだけ — speaker B, not mic 質問者. */
+  /** セミナーだけ — speaker B (mic and Zoom). */
   const copySeminarOnly = () => {
     void copySelection(
       '__seminar__',
@@ -3303,7 +3299,7 @@ export default function Home() {
                       : styles.roleButton
                   }
                   aria-pressed={activeSpeakerId === role.id}
-                  onClick={() => setActiveSpeakerId(role.id)}
+                  onClick={() => chooseSpeaker(role.id)}
                 >
                   {role.label}
                 </button>
@@ -3387,7 +3383,7 @@ export default function Home() {
                           type="button"
                           className={categoryButtonClass(cat.id, active)}
                           aria-pressed={active}
-                          onClick={() => chooseZoomSpeaker(cat.speakerId)}
+                          onClick={() => chooseSpeaker(cat.speakerId)}
                         >
                           {cat.label}
                         </button>
@@ -3408,7 +3404,7 @@ export default function Home() {
                           type="button"
                           className={letterRoleClass(id, active)}
                           aria-pressed={active}
-                          onClick={() => chooseZoomSpeaker(id)}
+                          onClick={() => chooseSpeaker(id)}
                         >
                           {zoomLetterButtonLabel(id)}
                         </button>

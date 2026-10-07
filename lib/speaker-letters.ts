@@ -73,20 +73,14 @@ export function zoomLetterButtonLabel(speakerId: number): string {
 
 /**
  * Quiet card-meta label. null means omit the word (unset / unknown speaker).
- * Zoom A and mic メイン (id 1) → 自分. Zoom B → セミナー.
- * Zoom C (それ以外 bucket) → それ以外. D–G stay as the letter.
- * Mic 質問者 only when the segment was recorded in mic mode.
+ * Mic and Zoom share the same buckets: A 自分, B セミナー, C それ以外.
+ * D–G stay as the letter. Unmarked / default speech uses セミナー (B).
  */
 export function quietSpeakerTag(
   speakerId: number | undefined | null,
-  source?: RecordingSource | null
+  _source?: RecordingSource | null
 ): string | null {
   if (speakerId == null || !Number.isFinite(speakerId) || speakerId < 1) {
-    return null;
-  }
-  if (source === 'mic') {
-    if (speakerId === 1) return '自分';
-    if (speakerId === 2) return '質問者';
     return null;
   }
   if (speakerId === 1) return '自分';
@@ -100,7 +94,8 @@ export type CardSpeakerTone = 'self' | 'seminar' | 'other' | 'letter' | 'questio
 
 /**
  * Card color + chip text for at-a-glance who.
- * 自分 / セミナー / それ以外 / 質問者, and D–G as 発言者X. null = unset.
+ * 自分 / セミナー / それ以外, and D–G as 発言者X. null = unset.
+ * Mic and Zoom use the same labels; unmarked defaults to セミナー.
  */
 export function cardSpeakerBadge(
   speakerId: number | undefined | null,
@@ -108,11 +103,6 @@ export function cardSpeakerBadge(
 ): { tone: CardSpeakerTone; label: string } | null {
   const tag = quietSpeakerTag(speakerId, source);
   if (!tag || speakerId == null) return null;
-  if (source === 'mic') {
-    return speakerId === 1
-      ? { tone: 'self', label: '自分' }
-      : { tone: 'questioner', label: '質問者' };
-  }
   if (speakerId === 1) return { tone: 'self', label: '自分' };
   if (speakerId === 2) return { tone: 'seminar', label: 'セミナー' };
   if (speakerId === 3) return { tone: 'other', label: 'それ以外' };

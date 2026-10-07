@@ -1,8 +1,8 @@
-/** Simple mic-mode roles (not full A–G diarization). */
+/** Simple mic-mode roles (aligned with Zoom seminar / self buckets). */
 
 export const MIC_ROLES = [
-  { id: 1, label: 'メインスピーカー' },
-  { id: 2, label: '質問者' },
+  { id: 2, label: 'セミナー' },
+  { id: 1, label: '自分' },
 ] as const;
 
 export type MicRoleId = (typeof MIC_ROLES)[number]['id'];
