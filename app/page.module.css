@@ -2712,12 +2712,46 @@
   align-items: center;
 }
 
-/* Hamburger — 議事録ノート list / open */
+/* Hamburger — 各回の議事録 list / open */
 .menuMeetings {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   padding: 0.15rem 0 0.35rem;
+}
+
+.menuMeetingsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.1rem 0.15rem 0.05rem;
+}
+
+.menuMeetingsLabel {
+  color: #ffe7a8;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.menuMeetingsAll {
+  appearance: none;
+  border: 1px solid rgba(246, 212, 138, 0.35);
+  background: rgba(246, 212, 138, 0.08);
+  color: #f6d48a;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.menuMeetingsAll:hover {
+  border-color: rgba(255, 231, 168, 0.7);
+  background: rgba(246, 212, 138, 0.16);
+  color: #fff4d4;
 }
 
 .menuMeetingCreate {
