@@ -2941,7 +2941,8 @@ export default function Home() {
         <button
           type="button"
           className={styles.menuButton}
-          aria-label="メニュー"
+          aria-label="議事録"
+          title="議事録"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen(true)}
         >
@@ -2950,6 +2951,7 @@ export default function Home() {
             <span />
             <span />
           </span>
+          <span className={styles.menuButtonLabel}>議事録</span>
         </button>
         <div className={styles.brand}>
           <span className={styles.brandMark} aria-hidden="true" />
@@ -3019,12 +3021,12 @@ export default function Home() {
           <button
             type="button"
             className={styles.menuBackdrop}
-            aria-label="メニューを閉じる"
+            aria-label="議事録を閉じる"
             onClick={() => setMenuOpen(false)}
           />
-          <aside className={styles.menuDrawer} role="dialog" aria-modal="true" aria-label="メニュー">
+          <aside className={styles.menuDrawer} role="dialog" aria-modal="true" aria-label="議事録">
             <div className={styles.menuDrawerHeader}>
-              <h2 className={styles.menuDrawerTitle}>メニュー</h2>
+              <h2 className={styles.menuDrawerTitle}>議事録</h2>
               <button
                 type="button"
                 className={styles.ghostButton}
