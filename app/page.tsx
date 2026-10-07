@@ -382,9 +382,10 @@ export default function Home() {
     /** Speaker selected when the segment was cut */
     speakerId: number | null;
     source: AudioSource;
-    /** Parallel mic capture. Zoom/system only; never set for mic-only jobs. */
-    micBlob?: Blob | null;
-    /** True when the user changed the Zoom picker during this segment. */
+    /**
+     * True only when the user explicitly picked 自分 / セミナー / … in this
+     * segment. Mic-only never auto-tags 自分 (no mic-energy path).
+     */
     manualLock?: boolean;
   };
   const uploadQueueRef = useRef<UploadJob[]>([]);
@@ -398,7 +399,7 @@ export default function Home() {
   const speakerModeRef = useRef<SpeakerMode>('manual');
   const pitchCentroidsRef = useRef<PitchCentroid[]>([]);
   const audioSourceRef = useRef<AudioSource>('mic');
-  const activeSpeakerRef = useRef<number>(1);
+  const activeSpeakerRef = useRef<number>(SEMINAR_SPEAKER_ID);
   const copyHintTimerRef = useRef<number | null>(null);
 
   const isTranscribing = pendingCount > 0;
@@ -727,9 +728,10 @@ export default function Home() {
         chunks = coalesceHomeCaptureChunks(chunks);
 
         if (!job.manualLock) {
-          // Mic + Zoom: unmarked → セミナー. Sticky picker / auto 自分 must not
-          // win without an explicit pick in this segment (manualLock).
-          if (mode === 'manual') {
+          // Default tag is always セミナー. Mic-only has no energy→自分 path;
+          // Zoom dual-stream energy is GD-only (transcribe-zoom), not Home.
+          // 自分 sticks only when the user explicitly picked it (manualLock).
+          if (job.source === 'mic' || mode === 'manual') {
             chunks = chunks.map((row) => ({
               ...row,
               speaker: SEMINAR_SPEAKER_ID,
@@ -813,18 +815,14 @@ export default function Home() {
   }, []);
 
   const enqueueTranscribe = useCallback(
-    (
-      blob: Blob,
-      extra?: { micBlob?: Blob | null; manualLock?: boolean }
-    ) => {
+    (blob: Blob, extra?: { manualLock?: boolean }) => {
       if (blob.size === 0) return;
       const source = audioSourceRef.current;
       uploadQueueRef.current.push({
         blob,
         speakerId: activeSpeakerRef.current,
         source,
-        // Energy comparison is Zoom/system only (legacy; Home no longer auto-自分).
-        micBlob: source === 'system' ? extra?.micBlob ?? null : null,
+        // Home never auto-tags 自分 from mic energy (mic-only or Zoom).
         manualLock: Boolean(extra?.manualLock),
       });
       setPendingCount((n) => n + 1);
@@ -855,54 +853,25 @@ export default function Home() {
       return;
     }
 
-    const micStream = micStreamRef.current;
-    let micRecorder: MediaRecorder | null = null;
-    const micChunks: Blob[] = [];
-    const micLive =
-      micStream != null &&
-      audioSourceRef.current === 'system' &&
-      micStream.getAudioTracks().some((t) => t.readyState === 'live');
-    const micSlice = micLive && micStream ? openRecordedSlice(micStream) : null;
-    if (micLive && micStream) {
-      try {
-        micRecorder = trackRecorder(
-          new MediaRecorder(micSlice?.stream ?? micStream, { mimeType })
-        );
-        micRecorder.ondataavailable = (e) => {
-          if (e.data.size > 0) micChunks.push(e.data);
-        };
-      } catch (err) {
-        console.warn('self mic recorder failed:', err);
-        micSlice?.release();
-        micRecorder = null;
-      }
-    } else {
-      micSlice?.release();
-    }
-    micRecorderRef.current = micRecorder;
+    // Home never opens a parallel mic for energy→自分 (mic-only or Zoom).
+    // GD live still uses dual-stream energy via transcribe-zoom / zoom-capture.
+    micRecorderRef.current = null;
     // Each new cut starts unmarked → セミナー until the user picks again.
     segmentManualRef.current = false;
     setActiveSpeakerId(SEMINAR_SPEAKER_ID);
     activeSpeakerRef.current = SEMINAR_SPEAKER_ID;
 
     let systemBlob: Blob | null = null;
-    let micBlob: Blob | null = null;
-    let systemDone = false;
-    let micDone = micRecorder == null;
     let settled = false;
 
     const finishSegment = () => {
-      if (!systemDone || !micDone || settled) return;
+      if (settled) return;
       settled = true;
       if (mediaRecorderRef.current === recorder) mediaRecorderRef.current = null;
-      if (micRecorderRef.current === micRecorder) micRecorderRef.current = null;
       if (epoch !== queueEpochRef.current) return;
       const manualLock = segmentManualRef.current;
       if (systemBlob && systemBlob.size > 0) {
-        enqueueTranscribe(systemBlob, {
-          micBlob: manualLock ? null : micBlob,
-          manualLock,
-        });
+        enqueueTranscribe(systemBlob, { manualLock });
       }
 
       if (wantRecordingRef.current && rotateAfterStopRef.current && streamRef.current) {
@@ -946,41 +915,14 @@ export default function Home() {
       endWatch?.();
       systemBlob = new Blob(chunksRef.current, { type: mimeType });
       chunksRef.current = [];
-      systemDone = true;
-      if (micRecorder && micRecorder.state === 'recording') {
-        try {
-          micRecorder.stop();
-        } catch {
-          micDone = true;
-        }
-      } else if (!micDone) {
-        micDone = true;
-      }
       finishSegment();
     };
-
-    if (micRecorder) {
-      micRecorder.onstop = () => {
-        micSlice?.release();
-        micBlob = micChunks.length > 0 ? new Blob(micChunks, { type: mimeType }) : null;
-        micDone = true;
-        finishSegment();
-      };
-      micRecorder.onerror = () => {
-        console.warn('self mic recorder error; continuing without auto 自分');
-        micSlice?.release();
-        micBlob = null;
-        micDone = true;
-        finishSegment();
-      };
-    }
 
     try {
       recorder.start(1000);
     } catch (err) {
       console.warn('system recorder start failed:', err);
       systemSlice?.release();
-      micSlice?.release();
       endWatch?.();
       setError('録音を開始できませんでした。');
       wantRecordingRef.current = false;
@@ -988,18 +930,6 @@ export default function Home() {
       return;
     }
     mediaRecorderRef.current = recorder;
-    if (micRecorder && micRecorder.state === 'inactive') {
-      try {
-        micRecorder.start(1000);
-      } catch (err) {
-        console.warn('self mic start failed:', err);
-        micSlice?.release();
-        micRecorderRef.current = null;
-        micDone = true;
-      }
-    } else if (!micRecorder) {
-      micSlice?.release();
-    }
   }, [enqueueTranscribe]);
 
   const rotateSegment = useCallback(() => {
@@ -2137,6 +2067,21 @@ export default function Home() {
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
+          {isEnglishEntry(entry) && !entry.textJa && (
+            <button
+              type="button"
+              className={styles.entryTranslate}
+              aria-label="この発言を日本語に翻訳"
+              disabled={isTranslating || isRecording}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                void translateEntry(entry);
+              }}
+            >
+              {isTranslating ? '翻訳中…' : '翻訳する'}
+            </button>
+          )}
           <button
             type="button"
             className={
@@ -2182,33 +2127,41 @@ export default function Home() {
             {armedDelete?.length === 1 && armedDelete[0] === entry.id ? '削除' : '×'}
           </button>
         </div>
-        <pre className={styles.transcript} data-transcript="">{entry.text}</pre>
-        {entry.textJa && (
-          <div
-            className={styles.translationBlock}
-            role="button"
-            tabIndex={0}
-            aria-label="日本語訳を大きく表示"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              if (window.getSelection()?.toString()) return;
-              e.stopPropagation();
-              openTranslationView(entry);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
+        <div
+          className={
+            entry.textJa
+              ? `${styles.entryBody} ${styles.entryBodyWithJa}`
+              : styles.entryBody
+          }
+        >
+          <pre className={styles.transcript} data-transcript="">{entry.text}</pre>
+          {entry.textJa && (
+            <div
+              className={styles.translationBlock}
+              role="button"
+              tabIndex={0}
+              aria-label="日本語訳を大きく表示"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                if (window.getSelection()?.toString()) return;
+                e.stopPropagation();
                 openTranslationView(entry);
-              }
-            }}
-          >
-            <div className={styles.translationLabel}>
-              <span>日本語訳（Ollama後翻訳）</span>
-              <span className={styles.translationLabelHint}>タップで拡大</span>
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  openTranslationView(entry);
+                }
+              }}
+            >
+              <div className={styles.translationLabel}>
+                <span>日本語訳（Ollama後翻訳）</span>
+                <span className={styles.translationLabelHint}>タップで拡大</span>
+              </div>
+              <pre className={styles.transcriptJa}>{entry.textJa}</pre>
             </div>
-            <pre className={styles.transcriptJa}>{entry.textJa}</pre>
-          </div>
-        )}
+          )}
+        </div>
       </li>
     );
   };
