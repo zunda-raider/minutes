@@ -3114,19 +3114,6 @@ export default function Home() {
                   {summary ? '保存済み要約を展開' : '要約パネルを開く'}
                 </span>
               </button>
-              <button
-                type="button"
-                className={styles.menuItem}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setScreen('gd');
-                }}
-              >
-                <span className={styles.menuItemTitle}>GDモード · 出航</span>
-                <span className={styles.menuItemDesc}>
-                  航海の準備画面。分析は出航のあと
-                </span>
-              </button>
             </nav>
             <div className={styles.menuGenre}>
               <label htmlFor="meeting-genre" className={styles.dockLabel}>
