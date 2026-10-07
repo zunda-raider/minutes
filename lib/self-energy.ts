@@ -1,10 +1,12 @@
 import { trackAudioContext } from '@/lib/capture-resources';
 
 /**
- * GD / Zoom live only: compare a parallel mic stream against system audio
- * to tag 自分 (A) vs それ以外 (C). Home Zoom seminar no longer uses this —
- * unmarked speech defaults to セミナー and 自分 is explicit-pick only.
- * Mic-only recording must not call this.
+ * GD Zoom live only: compare a parallel mic stream against system audio
+ * to tag 自分 (A) vs それ以外 (C).
+ *
+ * Home (mic-only and Zoom seminar) must never call this for default tagging —
+ * unmarked speech defaults to セミナー; 自分 is explicit-pick only. Mic-only
+ * has no dual stream, so energy→自分 would mis-tag the room mic as 自分.
  *
  * RMS is computed on decoded float PCM (full scale ≈ 1) inside each
  * transcribed time window. Quiet windows stay unset.
