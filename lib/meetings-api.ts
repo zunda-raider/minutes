@@ -121,3 +121,22 @@ export async function appendCardsViaApi(
     return null;
   }
 }
+
+/** PATCH /api/meetings/cards/:id — move (meetingId) or remove (null). */
+export async function moveCardViaApi(
+  cardId: string,
+  meetingId: string | null
+): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/meetings/cards/${encodeURIComponent(cardId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ meetingId }),
+    });
+    if (res.status === 503) return false;
+    return res.ok;
+  } catch (err) {
+    console.error('meeting card PATCH error:', err);
+    return false;
+  }
+}

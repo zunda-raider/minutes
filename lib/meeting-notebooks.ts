@@ -23,6 +23,9 @@ export type MeetingNotebook = {
   createdAt: string;
   /** Snapshotted cards archived into this notebook */
   entries: StoredTranscriptEntry[];
+  /** Optional time range (ISO) used by 「時間で自動振り分け」. */
+  startAt?: string;
+  endAt?: string;
 };
 
 export const MEETINGS_KEY = 'minutes.meetings.v1';
@@ -62,7 +65,9 @@ function isMeeting(value: unknown): value is MeetingNotebook {
     typeof m.title === 'string' &&
     typeof m.createdAt === 'string' &&
     Array.isArray(m.entries) &&
-    m.entries.every(isEntry)
+    m.entries.every(isEntry) &&
+    (m.startAt === undefined || typeof m.startAt === 'string') &&
+    (m.endAt === undefined || typeof m.endAt === 'string')
   );
 }
 
@@ -220,4 +225,139 @@ export function loadMeetingsWithMigration(
   saveMeetings(migrated);
   clearStoredMinutesBlocks();
   return migrated;
+}
+
+// ---------------------------------------------------------------------------
+// Time ranges / auto-file / move
+// ---------------------------------------------------------------------------
+
+function ms(iso: string | undefined): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Effective range of a meeting: explicit startAt/endAt, else first..last card.
+ * Meetings with neither have no range (never auto-filled into).
+ */
+export function meetingRange(
+  meeting: MeetingNotebook
+): { start: number; end: number } | null {
+  let start = ms(meeting.startAt);
+  let end = ms(meeting.endAt);
+  if (start == null || end == null) {
+    const times = meeting.entries
+      .map((e) => ms(e.at))
+      .filter((t): t is number => t != null);
+    if (times.length > 0) {
+      start ??= Math.min(...times);
+      end ??= Math.max(...times);
+    }
+  }
+  if (start == null || end == null || end < start) return null;
+  return { start, end };
+}
+
+/** Update a meeting's explicit time range (empty string clears). */
+export function setMeetingRange(
+  meeting: MeetingNotebook,
+  startAt: string | undefined,
+  endAt: string | undefined
+): MeetingNotebook {
+  const next: MeetingNotebook = { ...meeting };
+  if (startAt) next.startAt = startAt;
+  else delete next.startAt;
+  if (endAt) next.endAt = endAt;
+  else delete next.endAt;
+  return next;
+}
+
+export type AutoFilePlan = {
+  /** meetingId → cards that will be appended */
+  byMeeting: Map<string, StoredTranscriptEntry[]>;
+  total: number;
+};
+
+/**
+ * Plan: each unfiled card goes into the meeting whose range contains its
+ * timestamp (narrowest range wins). Cards already in any meeting are skipped.
+ */
+export function planAutoFile(
+  cards: StoredTranscriptEntry[],
+  meetings: MeetingNotebook[]
+): AutoFilePlan {
+  const filed = new Set<string>();
+  for (const m of meetings) for (const e of m.entries) filed.add(e.id);
+  const ranges = meetings
+    .map((m) => ({ id: m.id, r: meetingRange(m) }))
+    .filter((x): x is { id: string; r: { start: number; end: number } } => !!x.r)
+    .sort((a, b) => a.r.end - a.r.start - (b.r.end - b.r.start));
+  const byMeeting = new Map<string, StoredTranscriptEntry[]>();
+  let total = 0;
+  for (const card of cards) {
+    if (filed.has(card.id)) continue;
+    const t = ms(card.at);
+    if (t == null) continue;
+    const hit = ranges.find((x) => t >= x.r.start && t <= x.r.end);
+    if (!hit) continue;
+    const list = byMeeting.get(hit.id) ?? [];
+    list.push(card);
+    byMeeting.set(hit.id, list);
+    total += 1;
+  }
+  return { byMeeting, total };
+}
+
+/** Apply a plan: append cards to their meetings. */
+export function applyAutoFilePlan(
+  meetings: MeetingNotebook[],
+  plan: AutoFilePlan
+): MeetingNotebook[] {
+  return meetings.map((m) => {
+    const cards = plan.byMeeting.get(m.id);
+    return cards ? appendCardsToMeeting(m, cards) : m;
+  });
+}
+
+/** Cards whose timestamp is within [startIso, endIso] (inclusive). */
+export function cardsInRange(
+  cards: StoredTranscriptEntry[],
+  startIso: string,
+  endIso: string
+): StoredTranscriptEntry[] {
+  const s = ms(startIso);
+  const e = ms(endIso);
+  if (s == null || e == null || e < s) return [];
+  return cards.filter((c) => {
+    const t = ms(c.at);
+    return t != null && t >= s && t <= e;
+  });
+}
+
+/** Remove one card from whichever meeting holds it. */
+export function removeCardFromMeetings(
+  meetings: MeetingNotebook[],
+  cardId: string
+): { meetings: MeetingNotebook[]; card: StoredTranscriptEntry | null } {
+  let card: StoredTranscriptEntry | null = null;
+  const next = meetings.map((m) => {
+    const found = m.entries.find((e) => e.id === cardId);
+    if (!found) return m;
+    card = found;
+    return { ...m, entries: m.entries.filter((e) => e.id !== cardId) };
+  });
+  return { meetings: next, card };
+}
+
+/** Move one card into another meeting (no-op if target missing). */
+export function moveCardToMeeting(
+  meetings: MeetingNotebook[],
+  cardId: string,
+  targetId: string
+): MeetingNotebook[] {
+  if (!meetings.some((m) => m.id === targetId)) return meetings;
+  const { meetings: removed, card } = removeCardFromMeetings(meetings, cardId);
+  if (!card) return meetings;
+  return removed.map((m) => (m.id === targetId ? appendCardsToMeeting(m, [card]) : m));
 }

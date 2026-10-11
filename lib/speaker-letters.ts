@@ -78,6 +78,7 @@ export function zoomLetterButtonLabel(speakerId: number): string {
  */
 export function quietSpeakerTag(
   speakerId: number | undefined | null,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _source?: RecordingSource | null
 ): string | null {
   if (speakerId == null || !Number.isFinite(speakerId) || speakerId < 1) {

@@ -16,6 +16,8 @@ type MeetingRow = {
   meeting_date: Date | string;
   title: string;
   created_at: Date | string;
+  start_at: Date | string | null;
+  end_at: Date | string | null;
 };
 
 type CardRow = {
@@ -62,6 +64,13 @@ function toIso(value: Date | string): string {
   return value.toISOString();
 }
 
+function rangeFields(row: MeetingRow): { startAt?: string; endAt?: string } {
+  const out: { startAt?: string; endAt?: string } = {};
+  if (row.start_at != null) out.startAt = toIso(row.start_at);
+  if (row.end_at != null) out.endAt = toIso(row.end_at);
+  return out;
+}
+
 function rowToCard(row: CardRow): StoredTranscriptEntry {
   const entry: StoredTranscriptEntry = {
     id: row.id,
@@ -106,7 +115,9 @@ function isMeetingInput(value: unknown): value is MeetingNotebook {
     typeof m.title === 'string' &&
     typeof m.createdAt === 'string' &&
     Array.isArray(m.entries) &&
-    m.entries.every(isEntry)
+    m.entries.every(isEntry) &&
+    (m.startAt === undefined || typeof m.startAt === 'string') &&
+    (m.endAt === undefined || typeof m.endAt === 'string')
   );
 }
 
@@ -163,13 +174,22 @@ async function insertMeeting(
   meeting: MeetingNotebook
 ): Promise<void> {
   await client.query(
-    `INSERT INTO meetings (id, meeting_date, title, created_at)
-     VALUES ($1, $2::date, $3, $4::timestamptz)
+    `INSERT INTO meetings (id, meeting_date, title, created_at, start_at, end_at)
+     VALUES ($1, $2::date, $3, $4::timestamptz, $5::timestamptz, $6::timestamptz)
      ON CONFLICT (id) DO UPDATE SET
        meeting_date = EXCLUDED.meeting_date,
        title = EXCLUDED.title,
-       created_at = EXCLUDED.created_at`,
-    [meeting.id, meeting.date, meeting.title, meeting.createdAt]
+       created_at = EXCLUDED.created_at,
+       start_at = EXCLUDED.start_at,
+       end_at = EXCLUDED.end_at`,
+    [
+      meeting.id,
+      meeting.date,
+      meeting.title,
+      meeting.createdAt,
+      meeting.startAt ?? null,
+      meeting.endAt ?? null,
+    ]
   );
   await client.query(`DELETE FROM meeting_cards WHERE meeting_id = $1`, [
     meeting.id,
@@ -180,7 +200,7 @@ async function insertMeeting(
 export async function listMeetingsFromDb(): Promise<MeetingNotebook[]> {
   const pool = getPool();
   const meetingsRes = await pool.query<MeetingRow>(
-    `SELECT id, meeting_date, title, created_at
+    `SELECT id, meeting_date, title, created_at, start_at, end_at
      FROM meetings
      ORDER BY meeting_date DESC, created_at DESC`
   );
@@ -208,6 +228,7 @@ export async function listMeetingsFromDb(): Promise<MeetingNotebook[]> {
       date: dateToYmd(row.meeting_date),
       title: row.title,
       createdAt: toIso(row.created_at),
+      ...rangeFields(row),
       entries: byMeeting.get(row.id) ?? [],
     }))
   );
@@ -218,7 +239,7 @@ export async function getMeetingFromDb(
 ): Promise<MeetingNotebook | null> {
   const pool = getPool();
   const meetingsRes = await pool.query<MeetingRow>(
-    `SELECT id, meeting_date, title, created_at
+    `SELECT id, meeting_date, title, created_at, start_at, end_at
      FROM meetings WHERE id = $1`,
     [id]
   );
@@ -238,6 +259,7 @@ export async function getMeetingFromDb(
     date: dateToYmd(row.meeting_date),
     title: row.title,
     createdAt: toIso(row.created_at),
+    ...rangeFields(row),
     entries: cardsRes.rows.map(rowToCard),
   };
 }
@@ -313,4 +335,30 @@ export async function appendCardsInDb(
     client.release();
   }
   return getMeetingFromDb(meetingId);
+}
+
+/**
+ * Move a filed card to another meeting (meetingId) or remove it (null).
+ * Returns the affected card's previous meeting id, or null if not found.
+ */
+export async function moveCardInDb(
+  cardId: string,
+  meetingId: string | null
+): Promise<{ from: string } | null> {
+  const pool = getPool();
+  const cur = await pool.query<{ meeting_id: string }>(
+    `SELECT meeting_id FROM meeting_cards WHERE id = $1`,
+    [cardId]
+  );
+  const from = cur.rows[0]?.meeting_id;
+  if (!from) return null;
+  if (meetingId == null) {
+    await pool.query(`DELETE FROM meeting_cards WHERE id = $1`, [cardId]);
+  } else {
+    await pool.query(`UPDATE meeting_cards SET meeting_id = $2 WHERE id = $1`, [
+      cardId,
+      meetingId,
+    ]);
+  }
+  return { from };
 }

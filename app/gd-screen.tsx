@@ -26,6 +26,8 @@ type Props = {
   onBack: () => void;
   /** Open the Home meeting-notebook picker for this transcript card. */
   onAddToMeeting?: (cardId: string) => void;
+  /** Open 「時間で自動振り分け」. */
+  onAutoFile?: () => void;
 };
 
 function entryText(entry: GdHistoryEntry): string {
@@ -94,7 +96,7 @@ function speakerCaption(entry: GdHistoryEntry): string {
 }
 
 
-export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting }: Props) {
+export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting, onAutoFile }: Props) {
   const ordered = useMemo(
     () => [...entries].sort((a, b) => a.note - b.note),
     [entries]
@@ -229,6 +231,11 @@ export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting 
             過去の文字起こしを眺められます。5軸の評価は、ライブを終了したときだけです。
           </p>
         </div>
+        {onAutoFile && (
+          <button type="button" className={gd.cargoAddMeeting} onClick={onAutoFile}>
+            時間で自動振り分け
+          </button>
+        )}
         <button type="button" className={gd.liveJump} onClick={() => setDeck('live')}>
           ライブ
         </button>
