@@ -36,6 +36,8 @@ import {
   type ZoomCategoryId,
 } from '@/lib/speaker-letters';
 import { applySpeakerSplit, type TextSpan } from '@/lib/split-speaker';
+import { splitCardInList } from '@/lib/split-card';
+import { deleteSpanInList } from '@/lib/delete-selection';
 import { mergeSelectedCards } from '@/lib/merge-entries';
 import { coalesceHomeCaptureChunks } from '@/lib/coalesce-home-chunks';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
@@ -375,6 +377,8 @@ export default function Home() {
   const [selectionKind, setSelectionKind] = useState<'cards' | 'text'>('cards');
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  /** Card + character span of the current partial text selection (for 「分割」). */
+  const [splitTarget, setSplitTarget] = useState<{ id: string; span: TextSpan } | null>(null);
   const selectionKindRef = useRef(selectionKind);
   selectionKindRef.current = selectionKind;
   /** Card-drag pointerup must not also commit a text selection. */
@@ -2262,6 +2266,109 @@ export default function Home() {
     window.getSelection()?.removeAllRanges();
   };
 
+  // ---- 分割 ---------------------------------------------------------------
+  useEffect(() => {
+    const onSel = () => {
+      const read = readTextSelection();
+      if (!read || read.hits.length !== 1) {
+        setSplitTarget((prev) => (prev ? null : prev));
+        return;
+      }
+      const id = read.hits[0]!;
+      const span = read.spans.get(id);
+      setSplitTarget((prev) =>
+        span
+          ? prev && prev.id === id && prev.span.start === span.start && prev.span.end === span.end
+            ? prev
+            : { id, span }
+          : null
+      );
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, []);
+
+  /** Split the selected card into [before][selected][after] in reading order. */
+  const splitSelectedText = () => {
+    const target = splitTarget;
+    if (!target) return;
+    let seq = 0;
+    const newId = () => {
+      seq += 1;
+      return `${Date.now()}-s${seq}-${Math.random().toString(36).slice(2, 8)}`;
+    };
+    const inMeeting = meetings.some((m) => m.entries.some((e) => e.id === target.id));
+    if (inMeeting) {
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.entries.some((e) => e.id === target.id)
+            ? { ...m, entries: splitCardInList(m.entries, target.id, target.span, newId) }
+            : m
+        )
+      );
+    } else {
+      setEntries((prev) => splitCardInList(prev, target.id, target.span, newId));
+    }
+    setSplitTarget(null);
+    setSelectedIds(new Set());
+    setSelectionKind('cards');
+    setArmedDelete(null);
+    selectAnchorRef.current = null;
+    textSpansRef.current = new Map();
+    window.getSelection()?.removeAllRanges();
+    flashCopyHint('分割しました');
+  };
+
+  /** Remove just the selected text from the card (「削除」). */
+  const deleteSelectedText = () => {
+    const target = splitTarget;
+    if (!target) return;
+    const inMeeting = meetings.some((m) => m.entries.some((e) => e.id === target.id));
+    const source = inMeeting
+      ? meetings.find((m) => m.entries.some((e) => e.id === target.id))!.entries
+      : entries;
+    const probe = deleteSpanInList(source, target.id, target.span);
+    const clear = () => {
+      setSplitTarget(null);
+      setSelectedIds(new Set());
+      setSelectionKind('cards');
+      setArmedDelete(null);
+      selectAnchorRef.current = null;
+      textSpansRef.current = new Map();
+      window.getSelection()?.removeAllRanges();
+    };
+    if (probe.emptied) {
+      if (!window.confirm('文章がすべて消えます。このカードごと削除しますか？')) return;
+      if (inMeeting) {
+        setMeetings((prev) =>
+          prev.map((m) =>
+            m.entries.some((e) => e.id === target.id)
+              ? { ...m, entries: m.entries.filter((e) => e.id !== target.id) }
+              : m
+          )
+        );
+      } else {
+        removeEntries([target.id]);
+      }
+      clear();
+      flashCopyHint('カードを削除しました');
+      return;
+    }
+    if (inMeeting) {
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.entries.some((e) => e.id === target.id)
+            ? { ...m, entries: deleteSpanInList(m.entries, target.id, target.span).list }
+            : m
+        )
+      );
+    } else {
+      setEntries((prev) => deleteSpanInList(prev, target.id, target.span).list);
+    }
+    clear();
+    flashCopyHint('選択部分を削除しました');
+  };
+
   const renderEntryCard = (entry: TranscriptEntry) => {
     const badge = cardSpeakerBadge(entry.speakerId, entry.source);
     const selected = selectionKind === 'cards' && selectedIds.has(entry.id);
@@ -2326,6 +2433,36 @@ export default function Home() {
           >
             {copiedId === entry.id ? 'コピー済み' : 'コピー'}
           </button>
+          {splitTarget?.id === entry.id && (
+            <button
+              type="button"
+              className={styles.entryAddToMeeting}
+              aria-label="選択した部分で分割"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                splitSelectedText();
+              }}
+            >
+              分割
+            </button>
+          )}
+                    {splitTarget?.id === entry.id && (
+            <button
+              type="button"
+              className={styles.entryAddToMeeting}
+              aria-label="選択した部分を削除"
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                deleteSelectedText();
+              }}
+            >
+              削除
+            </button>
+          )}
           <button
             type="button"
             className={styles.entryAddToMeeting}
@@ -3001,7 +3138,7 @@ export default function Home() {
   const renderMinutesLine = (entry: TranscriptEntry, inMeeting = false) => {
     const badge = cardSpeakerBadge(entry.speakerId, entry.source);
     return (
-      <li key={entry.id} className={styles.minutesLine}>
+      <li key={entry.id} className={styles.minutesLine} data-entry-id={entry.id}>
         <span className={styles.minutesLineMeta}>
           <span className={styles.minutesLineNo}>#{formatNote(entry.note)}</span>
           {badge && (
@@ -3011,10 +3148,40 @@ export default function Home() {
           )}
           <time dateTime={entry.at}>{formatClock(entry.at)}</time>
         </span>
-        <p className={styles.minutesLineText}>{entry.text}</p>
+        <p className={styles.minutesLineText} data-transcript="">{entry.text}</p>
         {entry.textJa && <p className={styles.minutesLineJa}>{entry.textJa}</p>}
         {inMeeting && (
           <div className={styles.addMeetingActions}>
+            {splitTarget?.id === entry.id && (
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                aria-label="選択した部分で分割"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  splitSelectedText();
+                }}
+              >
+                分割
+              </button>
+            )}
+                        {splitTarget?.id === entry.id && (
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                aria-label="選択した部分を削除"
+                onPointerDown={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteSelectedText();
+                }}
+              >
+                削除
+              </button>
+            )}
             {moveCardId === entry.id ? (
               <>
                 {meetings
