@@ -51,6 +51,10 @@ import {
   todayTokyo,
   type MeetingNotebook,
 } from '@/lib/meeting-notebooks';
+import {
+  fetchMeetingsFromApi,
+  replaceMeetingsViaApi,
+} from '@/lib/meetings-api';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
 import {
   analyzeBlobPitch,
@@ -309,6 +313,10 @@ export default function Home() {
   const [meetings, setMeetings] = useState<MeetingNotebook[]>([]);
   const [minutesView, setMinutesView] = useState<MinutesView>('list');
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  /** True after first Postgres sync attempt (success or unavailable). */
+  const [meetingsDbReady, setMeetingsDbReady] = useState(false);
+  /** False when DATABASE_URL is unset / API returns 503. */
+  const meetingsDbEnabledRef = useRef(false);
   const [draftDate, setDraftDate] = useState('');
   const [draftTitle, setDraftTitle] = useState('');
   /** Home card id waiting for 「議事録に入れる／保存」 meeting pick. */
@@ -467,14 +475,16 @@ export default function Home() {
     };
   }, []);
 
-  // Hydrate transcript history + summary from localStorage (client only)
+  // Hydrate transcript history + summary from localStorage (client only),
+  // then prefer Postgres meeting notebooks when /api/meetings is available.
   useEffect(() => {
     const stored = loadEntries();
     setEntries(stored);
     setSummary(loadSummary());
     setGenre(loadGenre());
     setSpeakerLabels(loadSpeakerLabels());
-    setMeetings(loadMeetingsWithMigration(stored));
+    const localMeetings = loadMeetingsWithMigration(stored);
+    setMeetings(localMeetings);
     setActiveMeetingId(loadActiveMeetingId());
     const mode = loadSpeakerMode();
     setSpeakerMode(mode);
@@ -483,6 +493,38 @@ export default function Home() {
     void listAudioIds()
       .then((ids) => setAudioIds(new Set(ids)))
       .catch((err) => console.error('audio id list failed:', err));
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const remote = await fetchMeetingsFromApi();
+        if (cancelled) return;
+        if (remote === null) {
+          // DATABASE_URL unset / DB down — keep localStorage notebooks.
+          meetingsDbEnabledRef.current = false;
+          return;
+        }
+        meetingsDbEnabledRef.current = true;
+        if (remote.length > 0) {
+          setMeetings(remote);
+          saveMeetings(remote);
+        } else if (localMeetings.length > 0) {
+          const synced = await replaceMeetingsViaApi(localMeetings);
+          if (!cancelled && synced) {
+            setMeetings(synced);
+            saveMeetings(synced);
+          }
+        }
+      } catch (err) {
+        console.error('meetings DB hydrate failed:', err);
+      } finally {
+        if (!cancelled) setMeetingsDbReady(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Persist on every change after hydrate (including clear → [])
@@ -497,6 +539,17 @@ export default function Home() {
     if (!historyReady) return;
     saveMeetings(meetings);
   }, [meetings, historyReady]);
+
+  // Debounced full sync to Postgres (localStorage remains a cache / offline fallback).
+  useEffect(() => {
+    if (!historyReady || !meetingsDbReady || !meetingsDbEnabledRef.current) return;
+    const timer = window.setTimeout(() => {
+      void replaceMeetingsViaApi(meetings).then((synced) => {
+        if (synced) saveMeetings(synced);
+      });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [meetings, historyReady, meetingsDbReady]);
 
   useEffect(() => {
     if (!historyReady) return;
