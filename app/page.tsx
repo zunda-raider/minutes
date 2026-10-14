@@ -26,6 +26,8 @@ import {
   letterForSpeakerId,
   ASSIGN_BUCKETS,
   cardSpeakerBadge,
+  micGdSpeakerBadge,
+  MIC_GD_SPEAKERS,
   type CardSpeakerTone,
   SELF_SPEAKER_ID,
   SEMINAR_SPEAKER_ID,
@@ -147,7 +149,7 @@ type TranscriptEntry = {
 };
 
 
-type Screen = 'home' | 'note1' | 'note2' | 'minutes' | 'gd';
+type Screen = 'home' | 'mic-gd' | 'minutes' | 'gd';
 
 /** list = notebooks; compose = create empty meeting; detail = one meeting */
 type MinutesView = 'list' | 'compose' | 'detail';
@@ -1057,7 +1059,11 @@ export default function Home() {
     try {
     setError('');
 
-    const source = audioSource;
+    // Mic GD is microphone-only (never Zoom getDisplayMedia).
+    const source = screen === 'mic-gd' ? 'mic' : audioSource;
+    if (screen === 'mic-gd' && audioSource !== 'mic') {
+      setAudioSource('mic');
+    }
     const generation = captureGeneration();
     let stream = streamRef.current;
     // A previous halt may have left the held share live but disabled.
@@ -1252,6 +1258,10 @@ export default function Home() {
     if (speakerId == null) return '—';
     const custom = speakerLabels[String(speakerId)];
     if (custom?.trim()) return custom.trim();
+    // Mic GD: fixed letters A–E (not 自分 / セミナー).
+    if (screen === 'mic-gd') {
+      return letterForSpeakerId(speakerId);
+    }
     const mic = micRoleLabel(speakerId);
     // Prefer mic role names when those ids were used as mic roles (no custom rename)
     if (mic && audioSource === 'mic') return mic;
@@ -1326,7 +1336,7 @@ export default function Home() {
   };
 
   /**
-   * Oldest → newest, independent of which Note screen is open.
+   * Oldest → newest, independent of which screen is open.
    * A successful copy (any of these buttons) stores the click time so
    * 「前回の続き」 can return only utterances created after that.
    */
@@ -1370,7 +1380,7 @@ export default function Home() {
   };
 
   /**
-   * 古い順にまとめてコピー — whole transcript oldest → newest (top of Note 1 down).
+   * 古い順にまとめてコピー — whole transcript oldest → newest.
    * Goes through copySelection, so it also moves the 前回の続き cursor.
    */
   const copyAllOldestFirst = () => {
@@ -1397,8 +1407,8 @@ export default function Home() {
     screen === 'minutes' && minutesView === 'detail' && activeMeetingId
       ? activeMeetingId
       : null;
-  const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
-  const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
+  /** Mic GD: minutes-style chronological stack (oldest → newest). */
+  const micGdEntries = [...entries].sort((a, b) => a.note - b.note);
   // Home only: newer segments on top, split pieces of one segment still read downward.
   const homeEntries = newestFirstReadingOrder(entries);
 
@@ -1511,6 +1521,23 @@ export default function Home() {
     setSummaryOpen(true);
     setMenuOpen(false);
     // Stay anchored to the chip — do not scroll the page away from the toggle.
+  };
+
+  const openMicGd = () => {
+    setMenuOpen(false);
+    // Mic GD is microphone-only; soft-stop Zoom/system capture if active.
+    if (isRecording && audioSourceRef.current === 'system') {
+      stopRecording();
+    }
+    setAudioSource('mic');
+    setActiveSpeakerId(1); // A
+    setScreen('mic-gd');
+  };
+
+  const setCardSpeaker = (entryId: string, speakerId: number) => {
+    setEntries((prev) =>
+      prev.map((e) => (e.id === entryId ? { ...e, speakerId } : e))
+    );
   };
 
   const openMinutesList = () => {
@@ -2429,7 +2456,10 @@ export default function Home() {
   };
 
   const renderEntryCard = (entry: TranscriptEntry) => {
-    const badge = cardSpeakerBadge(entry.speakerId, entry.source);
+    const badge =
+      screen === 'mic-gd'
+        ? micGdSpeakerBadge(entry.speakerId)
+        : cardSpeakerBadge(entry.speakerId, entry.source);
     const selected = selectionKind === 'cards' && selectedIds.has(entry.id);
     const tone = badge
       ? `${styles.entry} ${CARD_TONE_CLASS[badge.tone]}`
@@ -2458,6 +2488,37 @@ export default function Home() {
               </span>
             )}
           </span>
+          {screen === 'mic-gd' && (
+            <div
+              className={styles.micGdCardSpeakers}
+              role="group"
+              aria-label="発話者 A〜E"
+              onPointerDown={(e) => e.stopPropagation()}
+            >
+              {MIC_GD_SPEAKERS.map((s) => {
+                const active = entry.speakerId === s.id;
+                return (
+                  <button
+                    key={s.letter}
+                    type="button"
+                    className={
+                      active
+                        ? styles.micGdLetterActive
+                        : styles.micGdLetter
+                    }
+                    aria-pressed={active}
+                    aria-label={`発話者${s.letter}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setCardSpeaker(entry.id, s.id);
+                    }}
+                  >
+                    {s.letter}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <time className={styles.entryTime} dateTime={entry.at}>
             {formatTime(entry.at)}
           </time>
@@ -2668,7 +2729,18 @@ export default function Home() {
     return (
       <div className={styles.assignBar} role="toolbar" aria-label="選択した発言の話者">
         <span className={styles.assignCount}>{selectedIds.size}件を</span>
-        {ASSIGN_BUCKETS.map((bucket) => (
+        {screen === 'mic-gd'
+          ? MIC_GD_SPEAKERS.map((s) => (
+              <button
+                key={s.letter}
+                type="button"
+                className={styles.micGdLetter}
+                onClick={() => assignSelectedBucket(s.id)}
+              >
+                {s.letter}
+              </button>
+            ))
+          : ASSIGN_BUCKETS.map((bucket) => (
           <button
             key={bucket.id}
             type="button"
@@ -3179,80 +3251,145 @@ export default function Home() {
     );
   };
 
-  const renderNoteScreen = (
-    title: string,
-    subtitle: string,
-    list: TranscriptEntry[]
-  ) => (
-    <div className={styles.app}>
-      <div className={styles.bgGlow} aria-hidden="true" />
+  const renderMicGdScreen = () => {
+    const list = micGdEntries;
+    return (
+      <div className={`${styles.app} ${styles.micGdScreen}`}>
+        <div className={styles.bgGlow} aria-hidden="true" />
 
-      <header className={styles.noteTopBar}>
-        <button
-          type="button"
-          className={styles.backButton}
-          onClick={() => setScreen('home')}
-        >
-          <span className={styles.backChevron} aria-hidden="true" />
-          Home
-        </button>
-        <div className={styles.noteHeading}>
-          <h1 className={styles.title}>{title}</h1>
-          <p className={styles.subtitle}>{subtitle}</p>
-        </div>
-        <div className={styles.topMeta}>
-          <StopShareButton />
-          <span className={styles.metaChip}>{entries.length} segments</span>
-          <span className={styles.metaChip}>Copy all = 古い順</span>
-        </div>
-      </header>
-
-      {error && (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
-      )}
-
-      {renderSummaryPanel()}
-      {renderTranslateModal()}
-      {renderAddToMeetingModal()}
-        {renderAutoFileModal()}
-
-      <section className={styles.feed}>
-        <div className={styles.feedHeader}>
-          <div>
-            <h2 className={styles.feedTitle}>Timeline</h2>
-            <p className={styles.feedCount}>
-              {list.length === 0
-                ? 'No segments yet'
-                : `Showing ${list.length} · # stays chronological`}
+        <header className={styles.noteTopBar}>
+          <button
+            type="button"
+            className={styles.backButton}
+            onClick={() => setScreen('home')}
+          >
+            <span className={styles.backChevron} aria-hidden="true" />
+            Home
+          </button>
+          <div className={styles.noteHeading}>
+            <h1 className={styles.title}>マイクGDモード</h1>
+            <p className={styles.subtitle}>
+              マイク録音 · 発話者 A〜E · 議事録風（時間軸なし）
             </p>
           </div>
-          {renderFeedActions()}
-        </div>
+          <div className={styles.topMeta}>
+            <StopShareButton />
+            <span className={styles.metaChip}>約{segmentMs / 1000}秒区切り</span>
+            <span className={styles.metaChip}>{list.length}件</span>
+          </div>
+        </header>
 
-        {list.length === 0 ? (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyOrb} aria-hidden="true" />
-            <h3 className={styles.emptyTitle}>No notes yet</h3>
-            <p className={styles.emptyBody}>
-              Go back Home, hit Record, and segments will appear here as a
-              browsable timeline.
-            </p>
+        <aside className={styles.micGdDock} aria-label="マイクGD操作">
+          <div className={styles.dockGroup}>
+            <span className={styles.dockLabel}>Language</span>
+            <div className={styles.langToggle} role="group" aria-label="Language">
+              {langs.map((opt) => (
+                <button
+                  key={opt.code}
+                  type="button"
+                  className={
+                    lang === opt.code ? styles.langButtonActive : styles.langButton
+                  }
+                  disabled={isRecording}
+                  aria-pressed={lang === opt.code}
+                  onClick={() => setLang(opt.code)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className={styles.dockGroupCenter}>
             <button
               type="button"
-              className={styles.recordButton}
-              onClick={() => setScreen('home')}
+              onClick={isRecording ? stopRecording : startRecording}
+              className={
+                isRecording ? styles.recordButtonActive : styles.recordButton
+              }
+              aria-pressed={isRecording}
             >
-              Back to Home
+              <span
+                className={
+                  isRecording ? styles.recordIconStop : styles.recordIconPlay
+                }
+                aria-hidden="true"
+              />
+              <span>{isRecording ? 'Stop' : 'Record'}</span>
             </button>
           </div>
-        ) : (
-          renderEntryList(list)
+
+          <div className={styles.micGdSpeakerBar}>
+            <span className={styles.dockLabel}>
+              {isRecording ? 'いま話す人' : '次の発話者'}
+            </span>
+            <div
+              className={styles.micGdLetterToggle}
+              role="group"
+              aria-label="発話者 A〜E"
+            >
+              {MIC_GD_SPEAKERS.map((s) => {
+                const active = activeSpeakerId === s.id;
+                return (
+                  <button
+                    key={s.letter}
+                    type="button"
+                    className={
+                      active ? styles.micGdLetterActive : styles.micGdLetter
+                    }
+                    aria-pressed={active}
+                    onClick={() => chooseSpeaker(s.id)}
+                  >
+                    {s.letter}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+
+        {error && (
+          <p className={styles.error} role="alert">
+            {error}
+          </p>
         )}
-      </section>
-    </div>
-  );
+
+        {renderSummaryPanel()}
+
+        <section className={styles.feed}>
+          <div className={styles.feedHeader}>
+            <div>
+              <h2 className={styles.feedTitle}>議事録ノート風</h2>
+              <p className={styles.feedCount}>
+                {list.length === 0
+                  ? 'まだカードがありません'
+                  : `${list.length}件 · 古い順（会話の流れ）`}
+              </p>
+            </div>
+            {renderFeedActions()}
+          </div>
+
+          {list.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyOrb} aria-hidden="true" />
+              <h3 className={styles.emptyTitle}>
+                {isTranscribing
+                  ? '最初の文字起こしを待っています'
+                  : 'マイクGDの準備ができました'}
+              </h3>
+              <p className={styles.emptyBody}>
+                {isTranscribing
+                  ? '音声を Whisper に送っています。結果がここに表示されます。'
+                  : '発話者 A〜E を選んで Record を押すと、マイク音声が議事録風のカードになります。カードのボタンで発話者を切り替え、「議事録に入れる／自動」でノートに保存できます。'}
+              </p>
+            </div>
+          ) : (
+            renderEntryList(list)
+          )}
+        </section>
+      </div>
+    );
+  };
 
   const renderMinutesScreen = () => {
     const renderCompose = () => (
@@ -3529,30 +3666,13 @@ export default function Home() {
     );
   }
 
-  if (screen === 'note1') {
+  if (screen === 'mic-gd') {
     return (
       <>
+        {renderTranslateModal()}
         {renderAddToMeetingModal()}
         {renderAutoFileModal()}
-        {renderNoteScreen(
-          'Note 1',
-          '古い順 · oldest → newest',
-          note1Entries
-        )}
-      </>
-    );
-  }
-
-  if (screen === 'note2') {
-    return (
-      <>
-        {renderAddToMeetingModal()}
-        {renderAutoFileModal()}
-        {renderNoteScreen(
-          'Note 2',
-          '新しい順 · newest → oldest',
-          note2Entries
-        )}
+        {renderMicGdScreen()}
       </>
     );
   }
@@ -3626,16 +3746,9 @@ export default function Home() {
           <button
             type="button"
             className={styles.noteEntryButton}
-            onClick={() => setScreen('note1')}
+            onClick={openMicGd}
           >
-            Note 1 · 古い順
-          </button>
-          <button
-            type="button"
-            className={styles.noteEntryButton}
-            onClick={() => setScreen('note2')}
-          >
-            Note 2 · 新しい順
+            マイクGDモード
           </button>
           <button
             type="button"
@@ -3746,24 +3859,12 @@ export default function Home() {
               <button
                 type="button"
                 className={styles.menuItem}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setScreen('note1');
-                }}
+                onClick={openMicGd}
               >
-                <span className={styles.menuItemTitle}>Note 1 · 古い順</span>
-                <span className={styles.menuItemDesc}>タイムラインを最初から読む</span>
-              </button>
-              <button
-                type="button"
-                className={styles.menuItem}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setScreen('note2');
-                }}
-              >
-                <span className={styles.menuItemTitle}>Note 2 · 新しい順</span>
-                <span className={styles.menuItemDesc}>最新セグメントを上に表示</span>
+                <span className={styles.menuItemTitle}>マイクGDモード</span>
+                <span className={styles.menuItemDesc}>
+                  マイク録音 · 発話者 A〜E · 議事録風
+                </span>
               </button>
               <button
                 type="button"
@@ -4044,7 +4145,7 @@ export default function Home() {
             <p className={styles.emptyBody}>
               {isTranscribing
                 ? '音声を Whisper に送っています。結果がここに表示されます。'
-                : '音声ソース（マイク / Zoom・LINE・他アプリ）を選び、Record を押してください。上の Note 1 / Note 2 で履歴を閲覧できます。'}
+                : '音声ソース（マイク / Zoom・LINE・他アプリ）を選び、Record を押してください。上の「マイクGDモード」では発話者 A〜E の議事録風ノートが使えます。'}
             </p>
           </div>
         ) : (

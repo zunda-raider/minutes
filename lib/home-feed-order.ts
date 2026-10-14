@@ -2,7 +2,7 @@
  * Home shows newer segments first, but a split utterance must still read
  * top-to-bottom. Fragments of one segment share `at`; keep that group in
  * note order and only reverse the groups.
- * Note 1 / Note 2 keep their plain note sorts.
+ * Mic GD / minutes screens keep plain chronological note sorts.
  */
 
 export function newestFirstReadingOrder<
