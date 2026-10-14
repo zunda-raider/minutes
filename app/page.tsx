@@ -1392,6 +1392,11 @@ export default function Home() {
 
   const activeMeeting =
     meetings.find((m) => m.id === activeMeetingId) ?? null;
+  /** Card mutations (assign / merge / delete / translate-all) target this notebook. */
+  const editingMeetingId =
+    screen === 'minutes' && minutesView === 'detail' && activeMeetingId
+      ? activeMeetingId
+      : null;
   const note1Entries = [...entries].sort((a, b) => a.note - b.note); // oldest → newest
   const note2Entries = [...entries].sort((a, b) => b.note - a.note); // newest → oldest
   // Home only: newer segments on top, split pieces of one segment still read downward.
@@ -1935,6 +1940,14 @@ export default function Home() {
       setEntries((prev) =>
         prev.map((e) => (e.id === entry.id ? { ...e, textJa } : e))
       );
+      setMeetings((prev) =>
+        prev.map((m) => ({
+          ...m,
+          entries: m.entries.map((e) =>
+            e.id === entry.id ? { ...e, textJa } : e
+          ),
+        }))
+      );
       setError('');
       return { textJa };
     } catch (e) {
@@ -1950,8 +1963,8 @@ export default function Home() {
     }
   };
 
-  const translateAllEnglish = async () => {
-    const targets = entries.filter((e) => isEnglishEntry(e) && !e.textJa);
+  const translateAllEnglish = async (list?: TranscriptEntry[]) => {
+    const targets = (list ?? entries).filter((e) => isEnglishEntry(e) && !e.textJa);
     if (targets.length === 0) return;
     const items: TranslateResultItem[] = [];
     const errors: string[] = [];
@@ -2187,26 +2200,47 @@ export default function Home() {
     return b.every((id) => set.has(id));
   };
 
-  const removeEntries = (ids: string[]) => {
-    if (ids.length === 0) return;
-    const drop = new Set(ids);
-    setEntries((prev) => prev.filter((entry) => !drop.has(entry.id)));
+  const clearSelectionAfterMutation = (drop?: Set<string>) => {
     setSelectedIds((prev) => {
+      if (!drop) return new Set();
       if (![...prev].some((id) => drop.has(id))) return prev;
       const next = new Set(prev);
       for (const id of drop) next.delete(id);
       return next;
     });
-    if (selectAnchorRef.current && drop.has(selectAnchorRef.current)) {
+    if (drop && selectAnchorRef.current && drop.has(selectAnchorRef.current)) {
       selectAnchorRef.current = null;
     }
+    if (!drop) {
+      selectAnchorRef.current = null;
+      textSpansRef.current = new Map();
+      window.getSelection()?.removeAllRanges();
+    }
+    setArmedDelete(null);
+  };
+
+  const removeEntries = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const drop = new Set(ids);
+    if (editingMeetingId) {
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.id !== editingMeetingId
+            ? m
+            : { ...m, entries: m.entries.filter((entry) => !drop.has(entry.id)) }
+        )
+      );
+      clearSelectionAfterMutation(drop);
+      return;
+    }
+    setEntries((prev) => prev.filter((entry) => !drop.has(entry.id)));
+    clearSelectionAfterMutation(drop);
     setAudioIds((prev) => {
       if (![...prev].some((id) => drop.has(id))) return prev;
       const next = new Set(prev);
       for (const id of drop) next.delete(id);
       return next;
     });
-    setArmedDelete(null);
     void deleteAudioSegments(ids).catch((err) =>
       console.error('audio delete failed:', err)
     );
@@ -2224,6 +2258,22 @@ export default function Home() {
   const mergeSelected = () => {
     const ids = selectedIdsRef.current;
     if (ids.size < 2) return;
+    if (editingMeetingId) {
+      setMeetings((prev) =>
+        prev.map((m) => {
+          if (m.id !== editingMeetingId) return m;
+          const next = mergeSelectedCards(m.entries, ids);
+          return next === m.entries ? m : { ...m, entries: next };
+        })
+      );
+      setSelectedIds(new Set());
+      setSelectionKind('cards');
+      setArmedDelete(null);
+      selectAnchorRef.current = null;
+      textSpansRef.current = new Map();
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
     const next = mergeSelectedCards(entries, ids);
     if (next === entries) return;
     const keep = new Set(next.map((entry) => entry.id));
@@ -2252,12 +2302,21 @@ export default function Home() {
     if (ids.size === 0) return;
     const spans = textSpansRef.current;
     let seq = 0;
-    setEntries((prev) =>
-      applySpeakerSplit(prev, ids, spans, speakerId, () => {
-        seq += 1;
-        return `${Date.now()}-${seq}-${Math.random().toString(36).slice(2, 8)}`;
-      })
-    );
+    const nextId = () => {
+      seq += 1;
+      return `${Date.now()}-${seq}-${Math.random().toString(36).slice(2, 8)}`;
+    };
+    if (editingMeetingId) {
+      setMeetings((prev) =>
+        prev.map((m) =>
+          m.id !== editingMeetingId
+            ? m
+            : { ...m, entries: applySpeakerSplit(m.entries, ids, spans, speakerId, nextId) }
+        )
+      );
+    } else {
+      setEntries((prev) => applySpeakerSplit(prev, ids, spans, speakerId, nextId));
+    }
     setSelectedIds(new Set());
     setSelectionKind('cards');
     setArmedDelete(null);
@@ -2448,7 +2507,7 @@ export default function Home() {
               分割
             </button>
           )}
-                    {splitTarget?.id === entry.id && (
+          {splitTarget?.id === entry.id && (
             <button
               type="button"
               className={styles.entryAddToMeeting}
@@ -2463,31 +2522,91 @@ export default function Home() {
               削除
             </button>
           )}
-          <button
-            type="button"
-            className={styles.entryAddToMeeting}
-            aria-label="議事録に入れる／保存"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              openAddToMeeting(entry.id);
-            }}
-          >
-            議事録に入れる／保存
-          </button>
-          <button
-            type="button"
-            className={styles.entryAddToMeeting}
-            aria-label="録音日時が近い議事録に自動で入れる"
-            title="録音日時が近い議事録に自動で入れる"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation();
-              autoFileCard(entry.id);
-            }}
-          >
-            自動
-          </button>
+          {editingMeetingId ? (
+            moveCardId === entry.id ? (
+              <>
+                {meetings
+                  .filter((m) => !m.entries.some((e) => e.id === entry.id))
+                  .map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={styles.entryAddToMeeting}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveFiledCard(entry.id, m.id);
+                      }}
+                    >
+                      → {meetingDisplayName(m)}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  className={styles.ghostButtonDanger}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    unfileCard(entry.id);
+                  }}
+                >
+                  外す（Homeへ）
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMoveCardId(null);
+                  }}
+                >
+                  キャンセル
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                aria-label="別の議事録へ移動"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMoveCardId(entry.id);
+                }}
+              >
+                移動
+              </button>
+            )
+          ) : (
+            <>
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                aria-label="議事録に入れる／保存"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openAddToMeeting(entry.id);
+                }}
+              >
+                議事録に入れる／保存
+              </button>
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                aria-label="録音日時が近い議事録に自動で入れる"
+                title="録音日時が近い議事録に自動で入れる"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  autoFileCard(entry.id);
+                }}
+              >
+                自動
+              </button>
+            </>
+          )}
           <button
             type="button"
             className={
@@ -2622,7 +2741,7 @@ export default function Home() {
         <button
           type="button"
           className={styles.ghostButton}
-          onClick={translateAllEnglish}
+          onClick={() => void translateAllEnglish()}
           disabled={translatingIds.size > 0 || isRecording}
         >
           {translatingIds.size > 0
@@ -3135,97 +3254,6 @@ export default function Home() {
     </div>
   );
 
-  const renderMinutesLine = (entry: TranscriptEntry, inMeeting = false) => {
-    const badge = cardSpeakerBadge(entry.speakerId, entry.source);
-    return (
-      <li key={entry.id} className={styles.minutesLine} data-entry-id={entry.id}>
-        <span className={styles.minutesLineMeta}>
-          <span className={styles.minutesLineNo}>#{formatNote(entry.note)}</span>
-          {badge && (
-            <span className={`${styles.entrySpeakerBadge} ${BADGE_TONE_CLASS[badge.tone]}`}>
-              {badge.label}
-            </span>
-          )}
-          <time dateTime={entry.at}>{formatClock(entry.at)}</time>
-        </span>
-        <p className={styles.minutesLineText} data-transcript="">{entry.text}</p>
-        {entry.textJa && <p className={styles.minutesLineJa}>{entry.textJa}</p>}
-        {inMeeting && (
-          <div className={styles.addMeetingActions}>
-            {splitTarget?.id === entry.id && (
-              <button
-                type="button"
-                className={styles.entryAddToMeeting}
-                aria-label="選択した部分で分割"
-                onPointerDown={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  splitSelectedText();
-                }}
-              >
-                分割
-              </button>
-            )}
-                        {splitTarget?.id === entry.id && (
-              <button
-                type="button"
-                className={styles.entryAddToMeeting}
-                aria-label="選択した部分を削除"
-                onPointerDown={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteSelectedText();
-                }}
-              >
-                削除
-              </button>
-            )}
-            {moveCardId === entry.id ? (
-              <>
-                {meetings
-                  .filter((m) => !m.entries.some((e) => e.id === entry.id))
-                  .map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className={styles.entryAddToMeeting}
-                      onClick={() => moveFiledCard(entry.id, m.id)}
-                    >
-                      → {meetingDisplayName(m)}
-                    </button>
-                  ))}
-                <button
-                  type="button"
-                  className={styles.ghostButtonDanger}
-                  onClick={() => unfileCard(entry.id)}
-                >
-                  外す（Homeへ）
-                </button>
-                <button
-                  type="button"
-                  className={styles.ghostButton}
-                  onClick={() => setMoveCardId(null)}
-                >
-                  キャンセル
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className={styles.entryAddToMeeting}
-                onClick={() => setMoveCardId(entry.id)}
-              >
-                移動
-              </button>
-            )}
-          </div>
-        )}
-      </li>
-    );
-  };
-
   const renderMinutesScreen = () => {
     const renderCompose = () => (
       <section className={styles.meetingCompose}>
@@ -3356,7 +3384,10 @@ export default function Home() {
           </div>
         );
       }
-      const items = activeMeeting.entries;
+      const items = activeMeeting.entries as TranscriptEntry[];
+      const meetingUntranslated = items.filter(
+        (e) => isEnglishEntry(e) && !e.textJa
+      );
       return (
         <>
           <div className={styles.minutesToolbar}>
@@ -3375,6 +3406,20 @@ export default function Home() {
             >
               {copiedId === `__mtg_${activeMeeting.id}__` ? 'コピー済み' : 'コピー'}
             </button>
+            {meetingUntranslated.length > 0 && (
+              <button
+                type="button"
+                className={styles.ghostButton}
+                onClick={() => void translateAllEnglish(items)}
+                disabled={translatingIds.size > 0 || isRecording}
+              >
+                {translatingIds.size > 0
+                  ? 'Ollama翻訳中…'
+                  : translateConfigured
+                    ? `Ollamaで全て翻訳 (${meetingUntranslated.length})`
+                    : 'Ollamaで全て翻訳'}
+              </button>
+            )}
             <button
               type="button"
               className={styles.ghostButtonDanger}
@@ -3412,9 +3457,7 @@ export default function Home() {
               <h3 className={styles.emptyTitle}>まだカードがありません</h3>
             </div>
           ) : (
-            <ol className={styles.minutesLines}>
-              {items.map((e) => renderMinutesLine(e, true))}
-            </ol>
+            renderEntryList(items)
           )}
         </>
       );
@@ -3478,6 +3521,7 @@ export default function Home() {
   if (screen === 'minutes') {
     return (
       <>
+        {renderTranslateModal()}
         {renderAddToMeetingModal()}
         {renderAutoFileModal()}
         {renderMinutesScreen()}
