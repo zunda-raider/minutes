@@ -361,3 +361,36 @@ export function moveCardToMeeting(
   if (!card) return meetings;
   return removed.map((m) => (m.id === targetId ? appendCardsToMeeting(m, [card]) : m));
 }
+
+/**
+ * Pick the meeting whose recording time is closest to `atIso`:
+ * a range containing it (narrowest wins), else minimal distance to the range
+ * (explicit start/end or first/last card), else to its createdAt.
+ */
+export function closestMeetingFor(
+  atIso: string,
+  meetings: MeetingNotebook[]
+): MeetingNotebook | null {
+  const t = ms(atIso);
+  if (meetings.length === 0) return null;
+  if (t == null) return null;
+  let best: { m: MeetingNotebook; dist: number; width: number } | null = null;
+  for (const m of meetings) {
+    const r = meetingRange(m);
+    let dist: number;
+    let width: number;
+    if (r) {
+      dist = t < r.start ? r.start - t : t > r.end ? t - r.end : 0;
+      width = r.end - r.start;
+    } else {
+      const c = ms(m.createdAt);
+      if (c == null) continue;
+      dist = Math.abs(t - c);
+      width = Number.POSITIVE_INFINITY;
+    }
+    if (!best || dist < best.dist || (dist === best.dist && width < best.width)) {
+      best = { m, dist, width };
+    }
+  }
+  return best?.m ?? null;
+}
