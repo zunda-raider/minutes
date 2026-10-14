@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS meetings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Optional time range for 「時間で自動振り分け」
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS start_at TIMESTAMPTZ;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS end_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS meeting_cards (
   id TEXT PRIMARY KEY,
   meeting_id TEXT NOT NULL REFERENCES meetings (id) ON DELETE CASCADE,

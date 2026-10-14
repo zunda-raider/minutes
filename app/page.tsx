@@ -41,7 +41,14 @@ import { coalesceHomeCaptureChunks } from '@/lib/coalesce-home-chunks';
 import { newestFirstReadingOrder } from '@/lib/home-feed-order';
 import {
   appendCardsToMeeting,
+  applyAutoFilePlan,
+  cardsInRange,
   createMeeting,
+  meetingRange,
+  moveCardToMeeting,
+  planAutoFile,
+  removeCardFromMeetings,
+  setMeetingRange,
   formatMeetingDateLabel,
   loadActiveMeetingId,
   loadMeetingsWithMigration,
@@ -53,6 +60,7 @@ import {
 } from '@/lib/meeting-notebooks';
 import {
   fetchMeetingsFromApi,
+  moveCardViaApi,
   replaceMeetingsViaApi,
 } from '@/lib/meetings-api';
 import { MIC_ROLES, micRoleLabel } from '@/lib/mic-roles';
@@ -105,6 +113,22 @@ import { postTranscribe } from '@/lib/transcribe-fetch';
 import { StopShareButton } from './stop-share';
 
 type LangOption = { code: string; label: string };
+
+/** ISO → value for <input type="datetime-local"> in local time. */
+function toLocalInput(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** datetime-local value → ISO (seconds rounded to cover the full minute at end). */
+function fromLocalInput(value: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
 
 type TranscriptEntry = {
   id: string;
@@ -323,6 +347,13 @@ export default function Home() {
   const [addCardId, setAddCardId] = useState<string | null>(null);
   /** In the picker: show name-first create form instead of picking an existing notebook. */
   const [addCreateNew, setAddCreateNew] = useState(false);
+  /** 「時間で自動振り分け」 modal */
+  const [autoFileOpen, setAutoFileOpen] = useState(false);
+  const [autoRangeStart, setAutoRangeStart] = useState('');
+  const [autoRangeEnd, setAutoRangeEnd] = useState('');
+  const [autoRangeTitle, setAutoRangeTitle] = useState('');
+  /** Card inside a meeting whose 移動 picker is open. */
+  const [moveCardId, setMoveCardId] = useState<string | null>(null);
   const [audioSource, setAudioSource] = useState<AudioSource>('mic');
   const [speakerLabels, setSpeakerLabels] = useState<SpeakerLabels>({});
   const [speakerMode, setSpeakerMode] = useState<SpeakerMode>('manual');
@@ -1590,6 +1621,127 @@ export default function Home() {
     return () => window.removeEventListener('keydown', onKey);
   }, [addCardId]);
 
+  // ---- 時間で自動振り分け -------------------------------------------------
+  const homeCardTimes = () =>
+    entries
+      .map((e) => new Date(e.at).getTime())
+      .filter((t) => Number.isFinite(t));
+
+  const openAutoFile = () => {
+    setMenuOpen(false);
+    const times = homeCardTimes();
+    if (times.length > 0) {
+      setAutoRangeStart(toLocalInput(new Date(Math.min(...times)).toISOString()));
+      setAutoRangeEnd(toLocalInput(new Date(Math.max(...times)).toISOString()));
+    } else {
+      setAutoRangeStart('');
+      setAutoRangeEnd('');
+    }
+    setAutoRangeTitle('');
+    setAutoFileOpen(true);
+  };
+
+  const closeAutoFile = () => setAutoFileOpen(false);
+
+  const fileCardsOut = (ids: Set<string>) => {
+    if (ids.size === 0) return;
+    removeArchivedFromHome(ids);
+    if (entries.every((e) => ids.has(e.id))) entriesLenRef.current = 0;
+  };
+
+  /** Apply range-based plan to existing meetings. */
+  const applyAutoFile = () => {
+    const plan = planAutoFile(entries, meetings);
+    if (plan.total === 0) {
+      flashCopyHint('振り分け対象なし');
+      return;
+    }
+    setMeetings(applyAutoFilePlan(meetings, plan));
+    const ids = new Set<string>();
+    for (const list of plan.byMeeting.values()) for (const c of list) ids.add(c.id);
+    fileCardsOut(ids);
+    flashCopyHint(`${plan.total}件を振り分けました`);
+    closeAutoFile();
+  };
+
+  /** Create a meeting for a picked time range and move cards in range into it. */
+  const createMeetingFromRange = () => {
+    const title = autoRangeTitle.trim();
+    if (!title) {
+      flashCopyHint('会議名を入力');
+      return;
+    }
+    const startIso = fromLocalInput(autoRangeStart);
+    const endIso = fromLocalInput(autoRangeEnd);
+    if (!startIso || !endIso || endIso < startIso) {
+      flashCopyHint('時間帯を確認');
+      return;
+    }
+    const filed = new Set(meetings.flatMap((m) => m.entries.map((e) => e.id)));
+    const cards = cardsInRange(entries, startIso, endIso).filter((c) => !filed.has(c.id));
+    const base = setMeetingRange(
+      createMeeting(title, todayTokyo(new Date(startIso))),
+      startIso,
+      endIso
+    );
+    const created = appendCardsToMeeting(base, cards);
+    setMeetings((prev) => [created, ...prev]);
+    setActiveMeetingId(created.id);
+    fileCardsOut(new Set(cards.map((c) => c.id)));
+    flashCopyHint(`${meetingDisplayName(created)} · ${cards.length}件`);
+    closeAutoFile();
+  };
+
+  // ---- 移動 / 外す ---------------------------------------------------------
+  const moveFiledCard = (cardId: string, targetId: string) => {
+    const target = meetings.find((m) => m.id === targetId);
+    setMeetings((prev) => moveCardToMeeting(prev, cardId, targetId));
+    setMoveCardId(null);
+    if (meetingsDbEnabledRef.current) void moveCardViaApi(cardId, targetId);
+    if (target) flashCopyHint(`→ ${meetingDisplayName(target)}`);
+  };
+
+  /** Take a card out of its meeting and put it back on Home. */
+  const unfileCard = (cardId: string) => {
+    const { meetings: next, card } = removeCardFromMeetings(meetings, cardId);
+    if (!card) return;
+    setMeetings(next);
+    setEntries((prev) =>
+      prev.some((e) => e.id === card.id)
+        ? prev
+        : [...prev, card as TranscriptEntry].sort((a, b) => a.note - b.note)
+    );
+    setMoveCardId(null);
+    if (meetingsDbEnabledRef.current) void moveCardViaApi(cardId, null);
+    flashCopyHint('Homeへ戻しました');
+  };
+
+  const updateActiveMeetingRange = (which: 'start' | 'end', localValue: string) => {
+    if (!activeMeetingId) return;
+    const iso = fromLocalInput(localValue) ?? undefined;
+    setMeetings((prev) =>
+      prev.map((m) =>
+        m.id !== activeMeetingId
+          ? m
+          : which === 'start'
+            ? setMeetingRange(m, iso, m.endAt)
+            : setMeetingRange(m, m.startAt, iso)
+      )
+    );
+  };
+
+  useEffect(() => {
+    if (!autoFileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setAutoFileOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [autoFileOpen]);
+
   const deleteMeeting = (id: string) => {
     setMeetings((prev) => prev.filter((m) => m.id !== id));
     if (activeMeetingId === id) setActiveMeetingId(null);
@@ -2371,6 +2523,127 @@ export default function Home() {
     </div>
   );
 
+  const renderAutoFileModal = () => {
+    if (!autoFileOpen) return null;
+    const plan = planAutoFile(entries, meetings);
+    const startIso = fromLocalInput(autoRangeStart);
+    const endIso = fromLocalInput(autoRangeEnd);
+    const filed = new Set(meetings.flatMap((m) => m.entries.map((e) => e.id)));
+    const rangeCount =
+      startIso && endIso
+        ? cardsInRange(entries, startIso, endIso).filter((c) => !filed.has(c.id)).length
+        : 0;
+    const ranged = meetings.filter((m) => meetingRange(m));
+    return (
+      <div className={styles.addMeetingRoot}>
+        <button
+          type="button"
+          className={styles.addMeetingBackdrop}
+          aria-label="閉じる"
+          onClick={closeAutoFile}
+        />
+        <div
+          className={styles.addMeetingModal}
+          role="dialog"
+          aria-modal="true"
+          aria-label="時間で自動振り分け"
+        >
+          <div className={styles.addMeetingHeader}>
+            <div>
+              <h2 className={styles.addMeetingTitle}>時間で自動振り分け</h2>
+              <p className={styles.addMeetingMeta}>
+                未振り分けのカード {entries.length}件 · 会議の時間帯に入るものを移動
+              </p>
+            </div>
+            <button type="button" className={styles.ghostButton} onClick={closeAutoFile}>
+              閉じる
+            </button>
+          </div>
+
+          <div className={styles.meetingTargetList} aria-label="振り分けプレビュー">
+            {ranged.length === 0 ? (
+              <p className={styles.addMeetingEmpty}>
+                時間帯のある会議がありません（下で時間帯から作成できます）
+              </p>
+            ) : (
+              ranged.map((m) => {
+                const r = meetingRange(m)!;
+                const n = plan.byMeeting.get(m.id)?.length ?? 0;
+                return (
+                  <div key={m.id} className={styles.meetingTarget}>
+                    <span className={styles.meetingTargetName}>
+                      {meetingDisplayName(m)}{' '}
+                      <small>
+                        {formatClock(new Date(r.start).toISOString())}–
+                        {formatClock(new Date(r.end).toISOString())}
+                      </small>
+                    </span>
+                    <span className={styles.meetingTargetCount}>+{n}件</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className={styles.addMeetingActions}>
+            <button
+              type="button"
+              className={styles.recordButton}
+              disabled={plan.total === 0}
+              onClick={applyAutoFile}
+            >
+              振り分ける（{plan.total}件）
+            </button>
+          </div>
+
+          <h3 className={styles.addMeetingTitle}>時間帯から新しい会議を作る</h3>
+          <div className={styles.meetingDraftFields}>
+            <label className={`${styles.meetingField} ${styles.meetingFieldName}`}>
+              <span>会議名</span>
+              <input
+                type="text"
+                className={styles.meetingTitleInput}
+                value={autoRangeTitle}
+                onChange={(e) => setAutoRangeTitle(e.target.value)}
+                placeholder="人材ミーティング"
+                autoComplete="off"
+              />
+            </label>
+          </div>
+          <div className={styles.meetingDraftFields}>
+            <label className={styles.meetingField}>
+              <span>開始</span>
+              <input
+                type="datetime-local"
+                className={styles.meetingDateInput}
+                value={autoRangeStart}
+                onChange={(e) => setAutoRangeStart(e.target.value)}
+              />
+            </label>
+            <label className={styles.meetingField}>
+              <span>終了</span>
+              <input
+                type="datetime-local"
+                className={styles.meetingDateInput}
+                value={autoRangeEnd}
+                onChange={(e) => setAutoRangeEnd(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className={styles.addMeetingActions}>
+            <button
+              type="button"
+              className={styles.recordButton}
+              disabled={!autoRangeTitle.trim() || !startIso || !endIso}
+              onClick={createMeetingFromRange}
+            >
+              作成して入れる（{rangeCount}件）
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAddToMeetingModal = () => {
     if (!addCardId) return null;
     const card = entries.find((e) => e.id === addCardId);
@@ -2651,6 +2924,7 @@ export default function Home() {
       {renderSummaryPanel()}
       {renderTranslateModal()}
       {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
 
       <section className={styles.feed}>
         <div className={styles.feedHeader}>
@@ -2688,7 +2962,7 @@ export default function Home() {
     </div>
   );
 
-  const renderMinutesLine = (entry: TranscriptEntry) => {
+  const renderMinutesLine = (entry: TranscriptEntry, inMeeting = false) => {
     const badge = cardSpeakerBadge(entry.speakerId, entry.source);
     return (
       <li key={entry.id} className={styles.minutesLine}>
@@ -2703,6 +2977,48 @@ export default function Home() {
         </span>
         <p className={styles.minutesLineText}>{entry.text}</p>
         {entry.textJa && <p className={styles.minutesLineJa}>{entry.textJa}</p>}
+        {inMeeting && (
+          <div className={styles.addMeetingActions}>
+            {moveCardId === entry.id ? (
+              <>
+                {meetings
+                  .filter((m) => !m.entries.some((e) => e.id === entry.id))
+                  .map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={styles.entryAddToMeeting}
+                      onClick={() => moveFiledCard(entry.id, m.id)}
+                    >
+                      → {meetingDisplayName(m)}
+                    </button>
+                  ))}
+                <button
+                  type="button"
+                  className={styles.ghostButtonDanger}
+                  onClick={() => unfileCard(entry.id)}
+                >
+                  外す（Homeへ）
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostButton}
+                  onClick={() => setMoveCardId(null)}
+                >
+                  キャンセル
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className={styles.entryAddToMeeting}
+                onClick={() => setMoveCardId(entry.id)}
+              >
+                移動
+              </button>
+            )}
+          </div>
+        )}
       </li>
     );
   };
@@ -2773,6 +3089,9 @@ export default function Home() {
             onClick={openNewMeetingCompose}
           >
             ＋ 新しい会議
+          </button>
+          <button type="button" className={styles.ghostButton} onClick={openAutoFile}>
+            時間で自動振り分け
           </button>
           {copyHint ? (
             <span className={styles.copyHint} role="status">
@@ -2860,6 +3179,24 @@ export default function Home() {
             >
               削除
             </button>
+            <label className={styles.meetingField}>
+              <span>開始</span>
+              <input
+                type="datetime-local"
+                className={styles.meetingDateInput}
+                value={toLocalInput(activeMeeting.startAt)}
+                onChange={(e) => updateActiveMeetingRange('start', e.target.value)}
+              />
+            </label>
+            <label className={styles.meetingField}>
+              <span>終了</span>
+              <input
+                type="datetime-local"
+                className={styles.meetingDateInput}
+                value={toLocalInput(activeMeeting.endAt)}
+                onChange={(e) => updateActiveMeetingRange('end', e.target.value)}
+              />
+            </label>
             {copyHint ? (
               <span className={styles.copyHint} role="status">
                 {copyHint}
@@ -2872,7 +3209,9 @@ export default function Home() {
               <h3 className={styles.emptyTitle}>まだカードがありません</h3>
             </div>
           ) : (
-            <ol className={styles.minutesLines}>{items.map(renderMinutesLine)}</ol>
+            <ol className={styles.minutesLines}>
+              {items.map((e) => renderMinutesLine(e, true))}
+            </ol>
           )}
         </>
       );
@@ -2937,6 +3276,7 @@ export default function Home() {
     return (
       <>
         {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
         {renderMinutesScreen()}
       </>
     );
@@ -2946,6 +3286,7 @@ export default function Home() {
     return (
       <>
         {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
         {renderNoteScreen(
           'Note 1',
           '古い順 · oldest → newest',
@@ -2959,6 +3300,7 @@ export default function Home() {
     return (
       <>
         {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
         {renderNoteScreen(
           'Note 2',
           '新しい順 · newest → oldest',
@@ -2972,12 +3314,14 @@ export default function Home() {
     return (
       <>
         {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
         <GdScreen
           entries={entries}
           genre={genre}
           historyReady={historyReady}
           onBack={() => setScreen('home')}
           onAddToMeeting={openAddToMeeting}
+          onAutoFile={openAutoFile}
         />
       </>
     );
@@ -2989,6 +3333,7 @@ export default function Home() {
       <div className={styles.bgGlow} aria-hidden="true" />
       {renderTranslateModal()}
       {renderAddToMeetingModal()}
+        {renderAutoFileModal()}
 
       <header className={styles.topBar}>
         <button
@@ -3051,6 +3396,14 @@ export default function Home() {
           >
             議事録ノート{meetings.length > 0 ? ` · ${meetings.length}` : ''}
           </button>
+          <button
+            type="button"
+            className={styles.noteEntryButton}
+            onClick={openAutoFile}
+            disabled={entries.length === 0}
+          >
+            時間で自動振り分け
+          </button>
         </div>
         <div className={styles.statusGenreRow}>
           <label htmlFor="meeting-genre-dock" className={styles.genreInlineLabel}>
@@ -3106,6 +3459,13 @@ export default function Home() {
                   onClick={openNewMeetingCompose}
                 >
                   ＋ 新しい会議
+                </button>
+                <button
+                  type="button"
+                  className={styles.menuMeetingCreate}
+                  onClick={openAutoFile}
+                >
+                  時間で自動振り分け
                 </button>
                 {meetings.length > 0 ? (
                   <div className={styles.menuMeetingList} role="list" aria-label="各回の議事録">

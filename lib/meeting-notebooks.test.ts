@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import {
   appendCardsToMeeting,
+  applyAutoFilePlan,
+  moveCardToMeeting,
+  planAutoFile,
+  removeCardFromMeetings,
   createMeeting,
   formatMeetingDateLabel,
   meetingDisplayName,
@@ -100,3 +104,27 @@ assert.equal(meetingDisplayName({ date: '2026-10-05', title: '  ' }), '10月5日
 }
 
 console.log('meeting-notebooks ok');
+
+// --- auto-file / move ---
+{
+  const at = (id: string, iso: string): StoredTranscriptEntry => ({ ...card(id, 1), at: iso });
+  const m1: MeetingNotebook = {
+    ...createMeeting('A', '2026-10-11'),
+    id: 'a',
+    startAt: '2026-10-11T01:00:00.000Z',
+    endAt: '2026-10-11T02:00:00.000Z',
+  };
+  const m2: MeetingNotebook = { ...createMeeting('B', '2026-10-11'), id: 'b', entries: [at('x', '2026-10-11T05:00:00.000Z')] };
+  const cards = [at('c1', '2026-10-11T01:30:00.000Z'), at('c2', '2026-10-11T03:00:00.000Z'), at('x', '2026-10-11T05:00:00.000Z')];
+  const plan = planAutoFile(cards, [m1, m2]);
+  assert.equal(plan.total, 1);
+  assert.deepEqual(plan.byMeeting.get('a')?.map((c) => c.id), ['c1']);
+  const applied = applyAutoFilePlan([m1, m2], plan);
+  const moved = moveCardToMeeting(applied, 'c1', 'b');
+  assert.equal(moved.find((m) => m.id === 'a')!.entries.length, 0);
+  assert.equal(moved.find((m) => m.id === 'b')!.entries.length, 2);
+  const { meetings: r, card: got } = removeCardFromMeetings(moved, 'c1');
+  assert.equal(got?.id, 'c1');
+  assert.equal(r.find((m) => m.id === 'b')!.entries.length, 1);
+  console.log('auto-file/move ok');
+}
