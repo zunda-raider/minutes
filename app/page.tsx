@@ -47,6 +47,7 @@ import {
   meetingRange,
   moveCardToMeeting,
   planAutoFile,
+  closestMeetingFor,
   removeCardFromMeetings,
   setMeetingRange,
   formatMeetingDateLabel,
@@ -1621,6 +1622,28 @@ export default function Home() {
     return () => window.removeEventListener('keydown', onKey);
   }, [addCardId]);
 
+  /** 「自動」: file one card into the meeting closest to its recording time. */
+  const autoFileCard = (cardId: string) => {
+    const card = entries.find((e) => e.id === cardId);
+    if (!card) {
+      flashCopyHint('発言が見つかりません');
+      return;
+    }
+    if (meetings.some((m) => m.entries.some((e) => e.id === cardId))) {
+      flashCopyHint('既に議事録に入っています');
+      return;
+    }
+    const target = closestMeetingFor(card.at, meetings);
+    if (!target) {
+      flashCopyHint('議事録がありません');
+      openAddToMeeting(cardId);
+      return;
+    }
+    if (archiveCardIntoMeeting(cardId, target.id)) {
+      flashCopyHint(`${meetingDisplayName(target)}に入れました`);
+    }
+  };
+
   // ---- 時間で自動振り分け -------------------------------------------------
   const homeCardTimes = () =>
     entries
@@ -2314,6 +2337,19 @@ export default function Home() {
             }}
           >
             議事録に入れる／保存
+          </button>
+          <button
+            type="button"
+            className={styles.entryAddToMeeting}
+            aria-label="録音日時が近い議事録に自動で入れる"
+            title="録音日時が近い議事録に自動で入れる"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              autoFileCard(entry.id);
+            }}
+          >
+            自動
           </button>
           <button
             type="button"
@@ -3322,6 +3358,7 @@ export default function Home() {
           onBack={() => setScreen('home')}
           onAddToMeeting={openAddToMeeting}
           onAutoFile={openAutoFile}
+          onAutoFileCard={autoFileCard}
         />
       </>
     );

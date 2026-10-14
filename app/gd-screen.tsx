@@ -28,6 +28,7 @@ type Props = {
   onAddToMeeting?: (cardId: string) => void;
   /** Open 「時間で自動振り分け」. */
   onAutoFile?: () => void;
+  onAutoFileCard?: (id: string) => void;
 };
 
 function entryText(entry: GdHistoryEntry): string {
@@ -96,7 +97,7 @@ function speakerCaption(entry: GdHistoryEntry): string {
 }
 
 
-export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting, onAutoFile }: Props) {
+export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting, onAutoFile, onAutoFileCard }: Props) {
   const ordered = useMemo(
     () => [...entries].sort((a, b) => a.note - b.note),
     [entries]
@@ -334,6 +335,19 @@ export function GdScreen({ entries, genre, historyReady, onBack, onAddToMeeting,
                           }}
                         >
                           議事録に入れる／保存
+                        </button>
+                      )}
+                      {onAutoFileCard && (
+                        <button
+                          type="button"
+                          className={gd.cargoAddMeeting}
+                          title="録音日時が近い議事録に自動で入れる"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAutoFileCard(entry.id);
+                          }}
+                        >
+                          自動
                         </button>
                       )}
                     </div>

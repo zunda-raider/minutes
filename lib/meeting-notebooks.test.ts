@@ -4,6 +4,7 @@ import {
   applyAutoFilePlan,
   moveCardToMeeting,
   planAutoFile,
+  closestMeetingFor,
   removeCardFromMeetings,
   createMeeting,
   formatMeetingDateLabel,
@@ -127,4 +128,16 @@ console.log('meeting-notebooks ok');
   assert.equal(got?.id, 'c1');
   assert.equal(r.find((m) => m.id === 'b')!.entries.length, 1);
   console.log('auto-file/move ok');
+}
+
+{
+  const mk = (id: string, s?: string, e?: string): MeetingNotebook => ({
+    id, date: '2026-01-01', title: id, createdAt: '2026-01-01T00:00:00Z', entries: [], startAt: s, endAt: e,
+  });
+  const a = mk('a', '2026-01-01T00:00:00Z', '2026-01-01T10:00:00Z');
+  const b = mk('b', '2026-01-01T01:00:00Z', '2026-01-01T02:00:00Z');
+  const c = mk('c', '2026-01-01T12:00:00Z', '2026-01-01T13:00:00Z');
+  assert.equal(closestMeetingFor('2026-01-01T01:30:00Z', [a, b, c])?.id, 'b');
+  assert.equal(closestMeetingFor('2026-01-01T11:30:00Z', [a, b, c])?.id, 'c');
+  assert.equal(closestMeetingFor('2026-01-01T11:30:00Z', []), null);
 }
