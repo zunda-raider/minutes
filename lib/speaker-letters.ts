@@ -109,3 +109,29 @@ export function cardSpeakerBadge(
   if (speakerId === 3) return { tone: 'other', label: 'それ以外' };
   return { tone: 'letter', label: `発言者${tag}` };
 }
+
+/** Mic GD mode: fixed participant letters A–E (ids 1–5). No Zoom role names. */
+export const MIC_GD_SPEAKERS = [
+  { id: 1, letter: 'A' },
+  { id: 2, letter: 'B' },
+  { id: 3, letter: 'C' },
+  { id: 4, letter: 'D' },
+  { id: 5, letter: 'E' },
+] as const;
+
+export const MIC_GD_MAX = MIC_GD_SPEAKERS.length;
+
+/** Card badge for mic GD: always show the letter A–E. */
+export function micGdSpeakerBadge(
+  speakerId: number | undefined | null
+): { tone: CardSpeakerTone; label: string } | null {
+  if (speakerId == null || !Number.isFinite(speakerId) || speakerId < 1) {
+    return null;
+  }
+  if (speakerId > MIC_GD_MAX) return null;
+  const letter = letterForSpeakerId(speakerId);
+  if (speakerId === 1) return { tone: 'self', label: letter };
+  if (speakerId === 2) return { tone: 'seminar', label: letter };
+  if (speakerId === 3) return { tone: 'other', label: letter };
+  return { tone: 'letter', label: letter };
+}
